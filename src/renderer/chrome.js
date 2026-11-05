@@ -16,34 +16,76 @@ const modalError = document.getElementById('modal-error');
 const modalSave = document.getElementById('modal-save');
 const stopAllBtn = document.getElementById('stop-all');
 let editingSlot = null;
+let riskReady = false;
 
-window.launcher.riskText().then((text) => {
-  modalRisk.textContent = text || '';
-});
+modalSave.disabled = true;
+window.launcher
+  .riskText()
+  .then((text) => {
+    modalRisk.textContent = text || '';
+    riskReady = Boolean(text);
+  })
+  .catch(() => {
+    riskReady = false;
+  })
+  .finally(() => {
+    modalSave.disabled = !riskReady;
+    modalError.textContent = riskReady ? '' : 'Nao foi possivel carregar o aviso de risco';
+  });
 
 document.getElementById('modal-cancel').addEventListener('click', closeModal);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !modal.hidden) closeModal();
+});
 modal.addEventListener('click', (e) => {
   if (e.target === modal) closeModal();
 });
 modalSave.addEventListener('click', async () => {
   modalError.textContent = '';
+  if (!modalConsent.checked) {
+    if (editingSlot?.automation?.enabled) {
+      modalSave.disabled = true;
+      try {
+        await disableSlotAutomation(editingSlot);
+        closeModal();
+      } finally {
+        modalSave.disabled = false;
+      }
+      return;
+    }
+    modalError.textContent = 'Confirme o aviso de risco para ativar';
+    return;
+  }
+  if (!riskReady) {
+    modalError.textContent = 'Aviso de risco indisponivel';
+    return;
+  }
   const config = {
-    enabled: modalConsent.checked,
-    consent: modalConsent.checked,
+    enabled: true,
+    consent: true,
     mode: modalMode.value,
     intervalMs: Number(modalInterval.value),
     jitterMs: Number(modalJitter.value),
     maxPerMin: Number(modalMax.value),
   };
   modalSave.disabled = true;
-  const res = await window.launcher.setAutomation(editingSlot.id, config);
-  modalSave.disabled = false;
-  if (!res?.ok) {
-    modalError.textContent = res?.error || 'Falha ao salvar';
-    return;
+  try {
+    const res = await window.launcher.setAutomation(editingSlot.id, config);
+    if (!res?.ok) {
+      modalError.textContent = res?.error || 'Falha ao salvar';
+      return;
+    }
+    closeModal();
+  } catch (err) {
+    modalError.textContent = err?.message ?? 'Falha ao salvar';
+  } finally {
+    modalSave.disabled = false;
   }
-  closeModal();
 });
+
+function disableSlotAutomation(slot) {
+  return window.launcher.setAutomation(slot.id, { ...slot.automation, enabled: false, consent: false });
+}
 
 stopAllBtn.addEventListener('click', async () => {
   await window.launcher.stopAllAutomation();
@@ -59,6 +101,7 @@ function openModal(slot) {
   modalMax.value = slot.automation?.maxPerMin ?? 20;
   modalError.textContent = '';
   modal.hidden = false;
+  (modalConsent.checked ? modalSave : modalConsent).focus();
 }
 
 function closeModal() {
@@ -129,7 +172,8 @@ window.launcher.onState((slots) => {
       window.launcher.removeSlot(s.id);
     });
     chip.appendChild(x);
-    const auto = document.createElement('span');
+    const auto = document.createElement('button');
+    auto.type = 'button';
     auto.className = `auto${s.automation?.enabled ? ' on' : ''}`;
     auto.textContent = 'AUTO';
     auto.dataset.state = s.autoState ?? 'idle';

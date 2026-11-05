@@ -2,7 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, ipcMain, Notification, session } from 'electron';
 import { SlotRegistry } from './slots.js';
-import { SlotStore, sweepOrphanPartitions, defaultState } from './store.js';
+import { SlotStore, sweepOrphanPartitions, defaultState, buildSnapshot } from './store.js';
 import { Notifier, parseGameEvent } from './notifications.js';
 import { createTray } from './tray.js';
 import { loadPack, buildAddonPreload, applyPackCss, sendPackRules, loadAutomationPack, auditPack } from './addons.js';
@@ -21,10 +21,12 @@ const audited = new Set();
 
 const automation = new AutomationController({
   getSlot: (id) => registry.get(id),
+  getAllSlots: () => registry.slots,
   persist: () => persist(),
   sendToSlot: (slotId, payload) => {
     const slot = registry.get(slotId);
-    if (!slot || slot.view.webContents.isDestroyed()) return;
+    if (!slot) return;
+    if (slot.view.webContents.isDestroyed()) return;
     slot.view.webContents.send('automation:config', { config: payload.config, pack: automationPack });
   },
 });
@@ -50,7 +52,27 @@ const notifier = new Notifier({
   },
 });
 
+let stateTimer = null;
+let statePending = false;
+
 function sendState() {
+  if (!win || win.isDestroyed()) return;
+  if (stateTimer) {
+    statePending = true;
+    return;
+  }
+  pushState();
+  stateTimer = setTimeout(() => {
+    stateTimer = null;
+    if (statePending) {
+      statePending = false;
+      sendState();
+    }
+  }, 400);
+  stateTimer.unref?.();
+}
+
+function pushState() {
   if (!win || win.isDestroyed()) return;
   win.webContents.send(
     'launcher:state',
@@ -70,6 +92,8 @@ function sendState() {
       autoThrows: s.automationStatus?.throws ?? 0,
     }))
   );
+  const anyAuto = registry.slots.filter((s) => s.automation?.enabled).length;
+  trayHandle?.setAutomationRunning?.(anyAuto);
 }
 
 function isChrome(sender) {
@@ -77,22 +101,7 @@ function isChrome(sender) {
 }
 
 function snapshot() {
-  return {
-    ...persisted,
-    slots: registry.slots.map((s) => {
-      const prev = persisted.slots.find((p) => p.id === s.id) ?? {};
-      return {
-        id: s.id,
-        name: s.name,
-        url: s.url,
-        partition: `persist:${s.id}`,
-        ratios: prev.ratios ?? null,
-        muted: s.muted === true,
-        zoomFactor: s.zoomFactor ?? 1,
-        automation: prev.automation ?? null,
-      };
-    }),
-  };
+  return buildSnapshot(persisted, registry.slots);
 }
 
 async function persist() {
@@ -162,13 +171,20 @@ function showWindow() {
 
 function wireAddonPack() {
   if (!addonPack) return;
+  const injected = new Map();
   app.on('web-contents-created', (_e, contents) => {
     if (contents === win?.webContents) return;
     const apply = () => {
       if (contents.isDestroyed()) return;
-      applyPackCss(contents, addonPack);
-      sendPackRules(contents, addonPack);
       const slot = registry.findByWebContentsId(contents.id);
+      const isMainView = slot && slot.view.webContents === contents;
+      const url = contents.getURL();
+      if (injected.get(contents.id) !== url) {
+        injected.set(contents.id, url);
+        applyPackCss(contents, addonPack);
+        sendPackRules(contents, addonPack);
+      }
+      if (!isMainView) return;
       if (slot?.automation?.enabled) {
         contents.send('automation:config', { config: slot.automation, pack: automationPack });
       }
@@ -182,6 +198,7 @@ function wireAddonPack() {
     contents.on('dom-ready', apply);
     contents.on('did-finish-load', apply);
     contents.on('did-navigate-in-page', apply);
+    contents.on('destroyed', () => injected.delete(contents.id));
   });
 }
 
@@ -202,7 +219,9 @@ async function restoreSlots() {
       if (created) {
         created.muted = slot.muted;
         created.zoomFactor = slot.zoomFactor;
-        if (slot.automation) created.automation = slot.automation;
+        if (slot.automation) {
+          created.automation = { ...slot.automation, enabled: false };
+        }
       }
     } catch (err) {
       console.error(`[restore] slot ${slot.id}:`, err.message);
@@ -291,12 +310,17 @@ app.whenReady().then(async () => {
   store = new SlotStore(path.join(app.getPath('userData'), 'slots.json'));
   const loaded = await store.read();
   persisted = loaded.state;
-  await sweepOrphanPartitions(
-    path.join(app.getPath('userData'), 'Partitions'),
-    persisted.slots.map((s) => s.partition)
-  );
+  if (loaded.source !== 'defaults' || loaded.warnings.length === 0) {
+    await sweepOrphanPartitions(
+      path.join(app.getPath('userData'), 'Partitions'),
+      persisted.slots.map((s) => s.partition)
+    );
+  } else {
+    console.error('[store] estado ilegivel: sweep de particoes adiado para nao apagar logins');
+  }
   try {
     addonPack = await loadPack();
+    automationPack = await loadAutomationPack();
     const preloadPath = await buildAddonPreload(path.join(app.getPath('userData'), 'preload'));
     registry.setAddonPreloadPath(preloadPath);
     wireAddonPack();

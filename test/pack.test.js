@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { collectSelectors, validatePack, matchesGame } from '../src/main/addons.js';
+import { collectSelectors, validatePack, matchesGame, loadAutomationPack, GAME_PATTERNS } from '../src/main/addons.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, '..');
@@ -19,7 +19,16 @@ test('pack do jogo e valido e tem regras/ancoras', async () => {
   assert.ok(p.rules.length >= 4);
   assert.ok(p.css.length >= 1);
   assert.equal(matchesGame('https://pokeidle.io/app'), true);
+  assert.equal(matchesGame('https://www.pokeidle.io/app'), true);
   assert.equal(matchesGame('https://evil.example/pokeidle.io'), false);
+  assert.ok(GAME_PATTERNS.includes('https://*.pokeidle.io/*'));
+});
+
+test('loadAutomationPack carrega candidatos e pausa', async () => {
+  const p = await loadAutomationPack();
+  assert.ok(p.clickCandidates.includes('.campo-bola'));
+  assert.ok(!p.clickCandidates.includes('.cb-quantos'), 'contador nao e botao de arremesso');
+  assert.equal(p.stopOnRule, 'pokemon-caught');
 });
 
 test('pack de automacao expoe candidatos de clique e pausa', async () => {

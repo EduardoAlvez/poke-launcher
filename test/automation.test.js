@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { AutomationController, canEnable, sanitizeAutomation, RISK_TEXT } from '../src/main/automation.js';
+import '../src/shared/engine.js';
 import '../src/shared/automation.js';
 
 const { installAutomation, findFirst, isPaused } = globalThis.PokeAutomation;
@@ -77,16 +78,18 @@ test('controller stopAll desliga todas as sessoes ativas', async () => {
   const sent = [];
   const controller = new AutomationController({
     getSlot: (id) => slots.get(id),
+    getAllSlots: () => [...slots.values()],
     persist: async () => {},
     sendToSlot: (id, payload) => sent.push([id, payload]),
     log: () => {},
   });
-  controller.reportStatus('slot-1', { running: true });
-  controller.reportStatus('slot-2', { running: true });
+  controller.reportStatus('slot-1', { state: 'clicking', running: true });
+  controller.reportStatus('slot-2', { state: 'clicking', running: true });
   assert.deepEqual(controller.runningSlots().sort(), ['slot-1', 'slot-2']);
   await controller.stopAll();
   assert.equal(sent.length, 2);
   assert.equal(sent.every(([, p]) => p.config.enabled === false), true);
+  assert.equal([...slots.values()].every((s) => s.automation.enabled === false), true);
 });
 
 test('findFirst devolve o primeiro botao visivel', () => {
@@ -126,13 +129,14 @@ test('automacao respeita limite por minuto', async () => {
     doc,
     win,
   });
-  await new Promise((r) => setTimeout(r, 1600));
+  assert.equal(clicks, 0, 'nao clica imediatamente no start');
+  await new Promise((r) => setTimeout(r, 2300));
   handle.stop();
-  assert.ok(clicks <= 2, `cliques limitados a 2 (${clicks})`);
-  assert.ok(clicks >= 1, `pelo menos 1 clique (${clicks})`);
+  assert.ok(clicks >= 2, `clica no minimo 2 vezes (${clicks})`);
+  assert.ok(clicks <= 3, `respeita o limite de 2/min (${clicks})`);
 });
 
-test('kill switch interrompe o loop em menos de 500ms', async () => {
+test('kill switch interrompe de fato o loop', async () => {
   let clicks = 0;
   const doc = {
     body: { textContent: '' },
@@ -145,14 +149,60 @@ test('kill switch interrompe o loop em menos de 500ms', async () => {
     clearTimeout: (id) => clearTimeout(id),
   };
   const handle = installAutomation({
-    config: { enabled: true, mode: 'fixed', intervalMs: 5000, jitterMs: 0, maxPerMin: 60 },
+    config: { enabled: true, mode: 'fixed', intervalMs: 500, jitterMs: 0, maxPerMin: 60 },
     pack: { clickCandidates: ['.campo-bola'], pauseSelectors: [], pauseText: [] },
     emit: () => {},
     doc,
     win,
   });
+  await new Promise((r) => setTimeout(r, 1300));
   const before = clicks;
   handle.stop();
-  await new Promise((r) => setTimeout(r, 200));
+  assert.ok(before > 0, `loop clicou antes do stop (${before})`);
+  assert.equal(handle.isRunning(), false);
+  await new Promise((r) => setTimeout(r, 1300));
   assert.equal(clicks, before, 'nenhum clique apos o stop');
+});
+
+test('erro dentro do tick nao mata o loop', async () => {
+  let attempts = 0;
+  const doc = {
+    body: { textContent: '' },
+    defaultView: null,
+    querySelector: () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('dom quebrado');
+      return { textContent: '', hidden: false, click: () => {} };
+    },
+  };
+  const win = {
+    crypto: { getRandomValues: (arr) => { arr[0] = 1; return arr; } },
+    setTimeout: (fn, ms) => setTimeout(fn, ms),
+    clearTimeout: (id) => clearTimeout(id),
+  };
+  const handle = installAutomation({
+    config: { enabled: true, mode: 'fixed', intervalMs: 500, jitterMs: 0, maxPerMin: 60 },
+    pack: { clickCandidates: ['.campo-bola'], pauseSelectors: [], pauseText: [] },
+    emit: () => {},
+    doc,
+    win,
+  });
+  await new Promise((r) => setTimeout(r, 1200));
+  handle.stop();
+  assert.ok(attempts >= 2, `continuou apos o erro (${attempts})`);
+});
+
+test('pauseWithin limita a busca de texto e parseCount entende numeros', async () => {
+  const { parseCount } = globalThis.PokeAddonEngine;
+  assert.equal(parseCount('1.234'), 1234);
+  assert.equal(parseCount('1.5'), 1.5);
+  assert.equal(parseCount('12 bolas'), 12);
+  assert.equal(parseCount('sem numero'), null);
+  const doc = {
+    body: { textContent: 'sem bolas' },
+    defaultView: null,
+    querySelector: () => null,
+  };
+  assert.equal(isPaused(doc, { pauseText: ['sem bolas'] }), true);
+  assert.equal(isPaused(doc, { pauseText: ['sem bolas'], pauseWithin: '.nao-existe' }), true);
 });

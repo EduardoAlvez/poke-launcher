@@ -90,11 +90,32 @@ export function parseState(rawText) {
   return { ok: true, state: { schemaVersion: SCHEMA_VERSION, maxSlots, slots } };
 }
 
+export function buildSnapshot(previous, slots) {
+  return {
+    ...previous,
+    slots: (slots ?? []).map((s) => {
+      const prev = previous?.slots?.find((p) => p.id === s.id) ?? {};
+      return {
+        id: s.id,
+        name: s.name,
+        url: s.url,
+        partition: `persist:${s.id}`,
+        ratios: s.ratios ?? prev.ratios ?? null,
+        muted: s.muted === true,
+        zoomFactor: s.zoomFactor ?? 1,
+        automation: s.automation ?? null,
+      };
+    }),
+  };
+}
+
 export class SlotStore {
   constructor(filePath) {
     this.filePath = filePath;
     this.backupPath = `${filePath}.bak`;
     this.warnings = [];
+    this.queue = Promise.resolve();
+    this.writeSeq = 0;
   }
 
   async read() {
@@ -123,17 +144,27 @@ export class SlotStore {
     }
   }
 
-  async write(state) {
+  write(state) {
+    const run = this.queue.then(() => this.writeNow(state));
+    this.queue = run.catch(() => {});
+    return run;
+  }
+
+  async writeNow(state) {
     const payload = JSON.stringify({ ...state, schemaVersion: SCHEMA_VERSION }, null, 2);
-    const tmp = `${this.filePath}.tmp`;
+    const tmp = `${this.filePath}.${process.pid}.${++this.writeSeq}.tmp`;
     await fs.mkdir(path.dirname(this.filePath), { recursive: true });
     try {
       await fs.copyFile(this.filePath, this.backupPath);
     } catch (err) {
       if (err.code !== 'ENOENT') throw err;
     }
-    await fs.writeFile(tmp, payload, 'utf8');
-    await fs.rename(tmp, this.filePath);
+    try {
+      await fs.writeFile(tmp, payload, 'utf8');
+      await fs.rename(tmp, this.filePath);
+    } finally {
+      await fs.rm(tmp, { force: true }).catch(() => {});
+    }
   }
 }
 

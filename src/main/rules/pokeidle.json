@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "game": "pokeidle.io",
   "updatedAt": "2026-11-05",
   "css": [
@@ -15,6 +15,7 @@
       "title": "Capturou",
       "kind": "event",
       "debounceMs": 2000,
+      "excludeWithin": [".chat-msgs", ".chat-vao", ".chat-entrada"],
       "matchers": [
         { "kind": "text", "regex": "captur(ou|ado|ou!|ou\\b)", "flags": "i" },
         { "kind": "text", "regex": "parab[eé]ns.*(captur|pego)", "flags": "i" }
@@ -36,6 +37,7 @@
       "title": "Boss disponível",
       "kind": "event",
       "debounceMs": 30000,
+      "excludeWithin": [".chat-msgs", ".chat-vao", ".chat-entrada"],
       "matchers": [
         { "kind": "text", "regex": "boss\\s+(dispon[ií]vel|disponivel|ativo|liberado|liberou)", "flags": "i" }
       ]
@@ -45,6 +47,7 @@
       "title": "Ovo chocado",
       "kind": "event",
       "debounceMs": 30000,
+      "excludeWithin": [".chat-msgs", ".chat-vao", ".chat-entrada"],
       "matchers": [
         { "kind": "text", "regex": "ovo\\s+(chocou|chocad|cravou|nasceu)", "flags": "i" }
       ]

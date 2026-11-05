@@ -5,15 +5,48 @@
   }
 
   function parseCount(text) {
-    const match = String(text ?? '').replace(/\./g, '').match(/\d+/);
-    return match ? Number(match[0]) : null;
+    const raw = String(text ?? '').trim();
+    const match = raw.match(/\d[\d.,\s]*/);
+    if (!match) return null;
+    const token = match[0].trim();
+    const grouped = /^\d{1,3}([.,\s]\d{3})+$/.test(token);
+    let normalized;
+    if (grouped) {
+      normalized = token.replace(/[.,\s]/g, '');
+    } else if (token.includes('.') && token.includes(',')) {
+      normalized = token.replace(/\./g, '').replace(',', '.');
+    } else {
+      normalized = token.replace(',', '.');
+    }
+    const value = Number(normalized);
+    return Number.isFinite(value) ? value : null;
+  }
+
+  function excluded(rule, node) {
+    if (!rule?.excludeWithin?.length) return false;
+    if (typeof node?.closest !== 'function') return false;
+    for (const selector of rule.excludeWithin) {
+      try {
+        if (node.closest(selector)) return true;
+      } catch {
+        /* seletor invalido: ignora */
+      }
+    }
+    return false;
   }
 
   function ruleMatches(rule, node) {
+    if (excluded(rule, node)) return false;
     const text = textOf(node);
     for (const matcher of rule.matchers ?? []) {
+      if (!matcher) continue;
       if (matcher.kind === 'text') {
-        const regex = new RegExp(matcher.regex, matcher.flags ?? 'i');
+        let regex;
+        try {
+          regex = new RegExp(matcher.regex, matcher.flags ?? 'i');
+        } catch {
+          continue;
+        }
         if (regex.test(text)) return true;
       } else if (matcher.kind === 'selector') {
         if (matcher.selector && typeof node.matches === 'function' && node.matches(matcher.selector)) return true;
@@ -66,15 +99,25 @@
       onRule?.(rule.id);
     };
 
+    const emitFor = (node) => {
+      for (const rule of rules ?? []) {
+        if (rule.kind === 'counter') continue;
+        if (ruleMatches(rule, node)) canEmit(rule, textOf(node).trim());
+      }
+    };
+
     const onMutations = (records) => {
       for (const record of records) {
+        if (record.type === 'characterData') {
+          const node = record.target?.parentElement;
+          if (node) emitFor(node);
+          continue;
+        }
         for (const node of record.addedNodes ?? []) {
-          if (node.nodeType !== 1) continue;
-          for (const rule of rules ?? []) {
-            if (rule.kind === 'counter') continue;
-            if (ruleMatches(rule, node)) {
-              canEmit(rule, textOf(node).trim());
-            }
+          if (node.nodeType === 1) {
+            emitFor(node);
+          } else if (node.nodeType === 3 && node.parentElement) {
+            emitFor(node.parentElement);
           }
         }
       }
@@ -85,7 +128,7 @@
       const MutationObserverCtor = win.MutationObserver;
       if (MutationObserverCtor) {
         observer = new MutationObserverCtor(onMutations);
-        observer.observe(doc.body, { childList: true, subtree: true });
+        observer.observe(doc.body, { childList: true, subtree: true, characterData: true });
       }
       const counters = (rules ?? []).filter((r) => r.kind === 'counter');
       if (counters.length) {

@@ -15,8 +15,9 @@ export function sanitizeAutomation(raw) {
 }
 
 export class AutomationController {
-  constructor({ getSlot, persist, sendToSlot, log = console.error } = {}) {
+  constructor({ getSlot, getAllSlots, persist, sendToSlot, log = console.error } = {}) {
     this.getSlot = getSlot;
+    this.getAllSlots = getAllSlots;
     this.persist = persist;
     this.sendToSlot = sendToSlot;
     this.log = log;
@@ -38,24 +39,51 @@ export class AutomationController {
     if (next.enabled && !canEnable(next)) {
       return { ok: false, error: 'e necessario confirmar o risco explicitamente' };
     }
-    slot.automation = next;
-    await this.persist();
+    if (!next.enabled) next.consent = false;
+    await this.persistWith(slot, next);
     this.sendToSlot(slotId, { config: next });
     this.log(`[automation] ${slotId}: ${next.enabled ? `ativado (${next.mode})` : 'desativado'}`);
     return { ok: true, config: next };
   }
 
+  async persistWith(slot, config) {
+    const previous = slot.automation;
+    slot.automation = config;
+    try {
+      await this.persist();
+    } catch (err) {
+      slot.automation = previous;
+      throw err;
+    }
+  }
+
   async stopAll() {
-    for (const [slotId] of this.status) {
-      this.sendToSlot(slotId, { config: { ...this.configFor(slotId), enabled: false } });
+    let changed = false;
+    for (const slot of this.allSlots()) {
+      if (!slot?.automation?.enabled) continue;
+      slot.automation = { ...slot.automation, enabled: false, consent: false };
+      slot.automationStatus = null;
+      this.sendToSlot(slot.id, { config: slot.automation });
+      changed = true;
     }
     this.status.clear();
+    if (changed) await this.persist();
     this.log('[automation] parada geral executada');
   }
 
+  allSlots() {
+    return this.getAllSlots ? this.getAllSlots() : [];
+  }
+
   reportStatus(slotId, payload) {
-    if (!slotId) return;
-    this.status.set(slotId, payload);
+    if (!slotId || !payload || typeof payload !== 'object') return;
+    if (typeof payload.state !== 'string' || payload.state.length > 32) return;
+    const throws = Number.isFinite(payload.throws) ? Math.max(0, Math.min(payload.throws, 1e7)) : 0;
+    this.status.set(slotId, {
+      state: payload.state,
+      running: payload.running === true,
+      throws,
+    });
   }
 
   runningSlots() {

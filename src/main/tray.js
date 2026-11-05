@@ -34,6 +34,9 @@ export function createTray({ iconPath, onShow, onToggleMute, isMuted, onStopAuto
       muted = value;
       tray.setContextMenu(buildMenu());
     },
+    setAutomationRunning(count) {
+      tray.setToolTip(count > 0 ? `Poke Launcher — automacao ativa em ${count} sessao(oes)` : 'Poke Launcher');
+    },
     destroy() {
       tray.destroy();
     },

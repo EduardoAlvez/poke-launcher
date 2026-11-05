@@ -1,9 +1,10 @@
 {
-  "version": 1,
+  "version": 2,
   "game": "pokeidle.io",
   "updatedAt": "2026-11-05",
-  "clickCandidates": [".campo-bola", ".ptl-bola", ".cb-quantos"],
+  "clickCandidates": [".campo-bola button", ".campo-bola .ptl-bola", ".campo-bola", ".ptl-bola"],
   "pauseSelectors": [".capturas-painel:not(.hidden)", ".hunt-saida:not(.hidden)", ".arena-saida:not(.hidden)"],
+  "pauseWithin": ".hud-hunt",
   "pauseText": ["sem bolas", "sem poções", "sem pocoes"],
   "stopOnRule": "pokemon-caught"
 }

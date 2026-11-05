@@ -130,3 +130,17 @@ test('sweepOrphanPartitions tolera raiz inexistente', async () => {
   const res = await sweepOrphanPartitions(path.join(os.tmpdir(), 'nao-existe-pokolauncher'), [], { log: () => {} });
   assert.deepEqual(res.removed, []);
 });
+
+test('buildSnapshot persiste a automacao do slot vivo, nao a anterior', async () => {
+  const { buildSnapshot } = await import('../src/main/store.js');
+  const previous = {
+    schemaVersion: 1,
+    maxSlots: 2,
+    slots: [{ id: 'slot-1', name: 'A', url: 'https://pokeidle.io/app', partition: 'persist:slot-1', automation: { enabled: true, consent: true, mode: 'fixed', intervalMs: 2000, jitterMs: 800, maxPerMin: 20 } }],
+  };
+  const live = [{ id: 'slot-1', name: 'A', url: 'https://pokeidle.io/app', automation: { enabled: false, consent: false, mode: 'fixed', intervalMs: 3000, jitterMs: 0, maxPerMin: 5 } }];
+  const snap = buildSnapshot(previous, live);
+  assert.equal(snap.slots[0].automation.enabled, false);
+  assert.equal(snap.slots[0].automation.intervalMs, 3000);
+  assert.equal(snap.slots[0].partition, 'persist:slot-1');
+});

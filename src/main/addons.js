@@ -10,6 +10,8 @@ const PACK_PATH = path.join(dirname, 'rules/pokeidle.json');
 const AUTOMATION_PACK_PATH = path.join(dirname, 'rules/automation-pokeidle.json');
 
 export const GAME_HOSTS = ['pokeidle.io'];
+export const GAME_PATTERNS = ['https://pokeidle.io/*', 'https://*.pokeidle.io/*'];
+const MAX_REGEX_LEN = 400;
 
 export function matchesGame(url) {
   let host;
@@ -32,7 +34,11 @@ export function validatePack(pack) {
       return { ok: false, error: `rule ${rule.id} sem matchers` };
     }
     for (const matcher of rule.matchers) {
+      if (!matcher || typeof matcher !== 'object') return { ok: false, error: `matcher invalido em ${rule.id}` };
       if (matcher.kind === 'text') {
+        if (typeof matcher.regex !== 'string' || !matcher.regex || matcher.regex.length > MAX_REGEX_LEN) {
+          return { ok: false, error: `regex invalida em ${rule.id}` };
+        }
         try {
           new RegExp(matcher.regex, matcher.flags ?? 'i');
         } catch (err) {
@@ -81,17 +87,20 @@ export function collectSelectors(pack) {
     if (typeof entry === 'string') {
       const match = entry.trim().match(/^([^{]+)\{/);
       if (match) selectors.add(match[1].trim());
-    } else {
-      for (const selector of entry.selectors ?? []) selectors.add(selector);
+    } else if (entry && Array.isArray(entry.selectors)) {
+      for (const selector of entry.selectors) {
+        if (typeof selector === 'string') selectors.add(selector);
+      }
     }
   }
-  return [...selectors];
+  return [...selectors].filter((s) => s.length <= 200);
 }
 
 export async function auditPack(contents, pack, { warn = console.warn } = {}) {
   const selectors = collectSelectors(pack);
   if (!selectors.length) return [];
   if (contents.isDestroyed()) return [];
+  if (!matchesGame(contents.getURL())) return [];
   let missing = [];
   try {
     missing = await contents.executeJavaScript(
@@ -130,7 +139,7 @@ export async function registerAddonPreload(session, preloadPath, url) {
   return session.registerPreloadScript({
     type: 'frame',
     filePath: preloadPath,
-    matches: GAME_HOSTS.map((h) => `https://${h}/*`),
+    matches: GAME_PATTERNS,
   });
 }
 
