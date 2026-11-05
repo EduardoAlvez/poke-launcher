@@ -61,3 +61,36 @@ button:hover { border-color: var(--accent); }
 #layout-btns button.active { border-color: var(--accent); color: var(--accent); }
 .empty-hint { color: var(--muted); padding: 12px; }
 .error { color: #ff6b6b; font-size: 12px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip .auto {
+  font-size: 10px; letter-spacing: .4px; color: var(--muted);
+  border: 1px solid #2c3240; border-radius: 4px; padding: 0 4px; cursor: pointer;
+}
+.chip .auto:hover { color: var(--accent); border-color: var(--accent); }
+.chip .auto.on { color: #ffb454; border-color: #ffb454; }
+.chip .auto.on[data-state="clicking"] { color: #3fbf7f; border-color: #3fbf7f; }
+button.danger { color: #ff6b6b; border-color: #4a2a2f; }
+button.danger:hover { border-color: #ff6b6b; }
+.muted { color: var(--muted); }
+#modal {
+  position: fixed; inset: 0; background: #0b0d11cc;
+  display: flex; align-items: center; justify-content: center; z-index: 10;
+}
+#modal[hidden] { display: none; }
+.modal-card {
+  background: #1a1d24; border: 1px solid #2c3240; border-radius: 10px;
+  padding: 18px 20px; width: 520px; max-width: 92vw;
+  box-shadow: 0 20px 60px #00000066;
+}
+.modal-card h2 { margin: 0 0 6px; font-size: 16px; }
+.risk {
+  background: #2a1f22; border: 1px solid #57323a; color: #ffc9c9;
+  padding: 10px 12px; border-radius: 8px; font-size: 12px; line-height: 1.45;
+}
+.check { display: flex; gap: 8px; align-items: flex-start; margin: 12px 0; font-size: 13px; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
+.grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.grid input, .grid select {
+  background: #0e1015; color: var(--fg); border: 1px solid #2c3240;
+  border-radius: 6px; padding: 6px 8px; font-size: 13px;
+}
+.actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }

@@ -4,8 +4,10 @@ import { fileURLToPath } from 'node:url';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const ENGINE_PATH = path.join(dirname, '../shared/engine.js');
+const AUTOMATION_PATH = path.join(dirname, '../shared/automation.js');
 const GLUE_PATH = path.join(dirname, '../preload/addon.cjs');
 const PACK_PATH = path.join(dirname, 'rules/pokeidle.json');
+const AUTOMATION_PACK_PATH = path.join(dirname, 'rules/automation-pokeidle.json');
 
 export const GAME_HOSTS = ['pokeidle.io'];
 
@@ -57,14 +59,24 @@ export async function loadPack() {
   return validated.pack;
 }
 
+export async function loadAutomationPack() {
+  const raw = await fs.readFile(AUTOMATION_PACK_PATH, 'utf8');
+  const pack = JSON.parse(raw);
+  if (!Array.isArray(pack.clickCandidates) || !pack.clickCandidates.length) {
+    throw new Error('pack de automacao sem candidatos de clique');
+  }
+  return pack;
+}
+
 export async function buildAddonPreload(targetDir) {
-  const [engine, glue] = await Promise.all([
+  const [engine, automation, glue] = await Promise.all([
     fs.readFile(ENGINE_PATH, 'utf8'),
+    fs.readFile(AUTOMATION_PATH, 'utf8'),
     fs.readFile(GLUE_PATH, 'utf8'),
   ]);
   await fs.mkdir(targetDir, { recursive: true });
   const file = path.join(targetDir, 'addon.cjs');
-  await fs.writeFile(file, `${engine}\n${glue}`, 'utf8');
+  await fs.writeFile(file, `${engine}\n${automation}\n${glue}`, 'utf8');
   return file;
 }
 

@@ -23,7 +23,42 @@
       <button data-cols="2" class="active" title="2 colunas">▯▯</button>
       <button data-cols="3" title="3 colunas">▯▯▯</button>
     </div>
+    <button id="stop-all" class="danger" hidden title="Parar todas as automacoes">Parar automações</button>
   </header>
+
+  <div id="modal" hidden>
+    <div class="modal-card">
+      <h2>Automação de lançamentos</h2>
+      <p id="modal-slot" class="muted"></p>
+      <p id="modal-risk" class="risk"></p>
+      <label class="check">
+        <input type="checkbox" id="modal-consent" />
+        <span>Entendo o risco e autorizo a automação nesta conta</span>
+      </label>
+      <div class="grid">
+        <label>Modo
+          <select id="modal-mode">
+            <option value="fixed">Lançar em intervalo fixo</option>
+            <option value="until-catch">Lançar até capturar</option>
+          </select>
+        </label>
+        <label>Intervalo (ms)
+          <input type="number" id="modal-interval" min="500" max="60000" step="100" />
+        </label>
+        <label>Jitter (ms)
+          <input type="number" id="modal-jitter" min="0" max="5000" step="100" />
+        </label>
+        <label>Máx. por minuto
+          <input type="number" id="modal-max" min="1" max="60" step="1" />
+        </label>
+      </div>
+      <p id="modal-error" class="error"></p>
+      <div class="actions">
+        <button id="modal-cancel">Cancelar</button>
+        <button id="modal-save" class="ok">Salvar</button>
+      </div>
+    </div>
+  </div>
   <script src="chrome.js"></script>
 </body>
 </html>

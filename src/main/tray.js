@@ -1,6 +1,6 @@
 import { Menu, Tray, nativeImage } from 'electron';
 
-export function createTray({ iconPath, onShow, onToggleMute, isMuted, onQuit }) {
+export function createTray({ iconPath, onShow, onToggleMute, isMuted, onStopAutomation, onQuit }) {
   const icon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
   const tray = new Tray(icon);
   let muted = isMuted;
@@ -19,6 +19,7 @@ export function createTray({ iconPath, onShow, onToggleMute, isMuted, onQuit }) 
           tray.setContextMenu(buildMenu());
         },
       },
+      { label: 'Parar automacoes', click: () => onStopAutomation() },
       { type: 'separator' },
       { label: 'Encerrar', click: () => onQuit() },
     ]);

@@ -5,7 +5,8 @@ import { SlotRegistry } from './slots.js';
 import { SlotStore, sweepOrphanPartitions, defaultState } from './store.js';
 import { Notifier, parseGameEvent } from './notifications.js';
 import { createTray } from './tray.js';
-import { loadPack, buildAddonPreload, applyPackCss, sendPackRules } from './addons.js';
+import { loadPack, buildAddonPreload, applyPackCss, sendPackRules, loadAutomationPack } from './addons.js';
+import { AutomationController, RISK_TEXT } from './automation.js';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const registry = new SlotRegistry();
@@ -15,6 +16,17 @@ let persisted = defaultState();
 let trayHandle = null;
 let quitting = false;
 let addonPack = null;
+let automationPack = null;
+
+const automation = new AutomationController({
+  getSlot: (id) => registry.get(id),
+  persist: () => persist(),
+  sendToSlot: (slotId, payload) => {
+    const slot = registry.get(slotId);
+    if (!slot || slot.view.webContents.isDestroyed()) return;
+    slot.view.webContents.send('automation:config', { config: payload.config, pack: automationPack });
+  },
+});
 
 const notifier = new Notifier({
   show: ({ slotId, title, body }) => {
@@ -46,6 +58,15 @@ function sendState() {
       name: s.name,
       url: s.url,
       loggedIn: s.loggedIn === true,
+      automation: {
+        enabled: s.automation?.enabled === true,
+        mode: s.automation?.mode ?? 'fixed',
+        intervalMs: s.automation?.intervalMs ?? 2000,
+        jitterMs: s.automation?.jitterMs ?? 800,
+        maxPerMin: s.automation?.maxPerMin ?? 20,
+      },
+      autoState: s.automationStatus?.state ?? null,
+      autoThrows: s.automationStatus?.throws ?? 0,
     }))
   );
 }
@@ -146,6 +167,10 @@ function wireAddonPack() {
       if (contents.isDestroyed()) return;
       applyPackCss(contents, addonPack);
       sendPackRules(contents, addonPack);
+      const slot = registry.findByWebContentsId(contents.id);
+      if (slot?.automation?.enabled) {
+        contents.send('automation:config', { config: slot.automation, pack: automationPack });
+      }
     };
     contents.on('dom-ready', apply);
     contents.on('did-finish-load', apply);
@@ -234,6 +259,25 @@ ipcMain.on('launcher:focus-slot', (event, payload) => {
   slot?.view.webContents.focus();
 });
 
+ipcMain.handle('automation:set', async (event, payload) => {
+  if (!isChrome(event.sender)) return { ok: false, error: 'origem invalida' };
+  const res = await automation.setConfig(payload?.id, payload?.config);
+  sendState();
+  return res;
+});
+
+ipcMain.handle('automation:stop-all', async (event) => {
+  if (!isChrome(event.sender)) return false;
+  await automation.stopAll();
+  sendState();
+  return true;
+});
+
+ipcMain.handle('automation:risk-text', (event) => {
+  if (!isChrome(event.sender)) return '';
+  return RISK_TEXT;
+});
+
 app.whenReady().then(async () => {
   app.setAppUserModelId(app.isPackaged ? 'dev.pokelauncher.app' : process.execPath);
   Notification.handleActivation?.(() => showWindow());
@@ -261,6 +305,10 @@ app.whenReady().then(async () => {
       notifier.muted = muted;
     },
     isMuted: notifier.muted,
+    onStopAutomation: () => {
+      automation.stopAll();
+      sendState();
+    },
     onQuit: () => {
       quitting = true;
       app.quit();
@@ -284,6 +332,13 @@ app.on('web-contents-created', (_e, contents) => {
     const parsed = parseGameEvent(payload);
     if (!parsed.ok) return;
     notifier.notify(slot.id, parsed.event);
+  });
+  contents.ipc?.on('automation:status', (_event, payload) => {
+    const slot = registry.findByWebContentsId(contents.id);
+    if (!slot) return;
+    automation.reportStatus(slot.id, payload);
+    slot.automationStatus = payload;
+    sendState();
   });
 });
 

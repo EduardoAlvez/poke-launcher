@@ -45,7 +45,7 @@
     return hits;
   }
 
-  function installEngine({ rules, emit, doc = root.document, win = root }) {
+  function installEngine({ rules, emit, onRule, doc = root.document, win = root }) {
     let observer = null;
     let interval = null;
     const lastEmit = new Map();
@@ -63,6 +63,7 @@
         ts: now,
         ruleId: rule.id,
       });
+      onRule?.(rule.id);
     };
 
     const onMutations = (records) => {

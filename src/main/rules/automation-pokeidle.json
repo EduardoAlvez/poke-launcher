@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "game": "pokeidle.io",
+  "updatedAt": "2026-11-05",
+  "clickCandidates": [".campo-bola", ".ptl-bola", ".cb-quantos"],
+  "pauseSelectors": [".capturas-painel:not(.hidden)", ".hunt-saida:not(.hidden)", ".arena-saida:not(.hidden)"],
+  "pauseText": ["sem bolas", "sem poções", "sem pocoes"],
+  "stopOnRule": "pokemon-caught"
+}
