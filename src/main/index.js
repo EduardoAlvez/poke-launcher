@@ -5,7 +5,7 @@ import { SlotRegistry } from './slots.js';
 import { SlotStore, sweepOrphanPartitions, defaultState } from './store.js';
 import { Notifier, parseGameEvent } from './notifications.js';
 import { createTray } from './tray.js';
-import { loadPack, buildAddonPreload, applyPackCss, sendPackRules, loadAutomationPack } from './addons.js';
+import { loadPack, buildAddonPreload, applyPackCss, sendPackRules, loadAutomationPack, auditPack } from './addons.js';
 import { AutomationController, RISK_TEXT } from './automation.js';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -17,6 +17,7 @@ let trayHandle = null;
 let quitting = false;
 let addonPack = null;
 let automationPack = null;
+const audited = new Set();
 
 const automation = new AutomationController({
   getSlot: (id) => registry.get(id),
@@ -170,6 +171,12 @@ function wireAddonPack() {
       const slot = registry.findByWebContentsId(contents.id);
       if (slot?.automation?.enabled) {
         contents.send('automation:config', { config: slot.automation, pack: automationPack });
+      }
+      if (!audited.has(contents.id)) {
+        audited.add(contents.id);
+        setTimeout(() => {
+          if (!contents.isDestroyed()) auditPack(contents, addonPack);
+        }, 8000).unref?.();
       }
     };
     contents.on('dom-ready', apply);

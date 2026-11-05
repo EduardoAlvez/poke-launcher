@@ -68,6 +68,51 @@ export async function loadAutomationPack() {
   return pack;
 }
 
+export function collectSelectors(pack) {
+  const selectors = new Set();
+  for (const rule of pack?.rules ?? []) {
+    for (const matcher of rule.matchers ?? []) {
+      if (matcher.kind === 'selector' && typeof matcher.selector === 'string') {
+        selectors.add(matcher.selector);
+      }
+    }
+  }
+  for (const entry of pack?.css ?? []) {
+    if (typeof entry === 'string') {
+      const match = entry.trim().match(/^([^{]+)\{/);
+      if (match) selectors.add(match[1].trim());
+    } else {
+      for (const selector of entry.selectors ?? []) selectors.add(selector);
+    }
+  }
+  return [...selectors];
+}
+
+export async function auditPack(contents, pack, { warn = console.warn } = {}) {
+  const selectors = collectSelectors(pack);
+  if (!selectors.length) return [];
+  if (contents.isDestroyed()) return [];
+  let missing = [];
+  try {
+    missing = await contents.executeJavaScript(
+      `(() => {
+        const sels = ${JSON.stringify(selectors)};
+        return sels.filter((s) => {
+          try { return !document.querySelector(s); } catch { return true; }
+        });
+      })()`,
+      true
+    );
+  } catch (err) {
+    warn('[addon] auditoria do pack falhou:', err?.message ?? err);
+    return [];
+  }
+  if (missing.length) {
+    warn(`[addon] ${missing.length} seletor(es) sem correspondencia no DOM:`, missing.join(', '));
+  }
+  return missing;
+}
+
 export async function buildAddonPreload(targetDir) {
   const [engine, automation, glue] = await Promise.all([
     fs.readFile(ENGINE_PATH, 'utf8'),
