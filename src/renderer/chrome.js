@@ -122,12 +122,14 @@ function openModal(slot) {
   modalMax.value = slot.automation?.maxPerMin ?? 20;
   modalError.textContent = '';
   modal.hidden = false;
+  window.launcher.setViewsVisible(false);
   (modalConsent.checked ? modalSave : modalConsent).focus();
 }
 
 function closeModal() {
   modal.hidden = true;
   editingSlot = null;
+  window.launcher.setViewsVisible(true);
 }
 
 addBtn.addEventListener('click', () => {

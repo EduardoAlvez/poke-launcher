@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('launcher', {
   focusSlot: (id) => ipcRenderer.send('launcher:focus-slot', { id }),
   closePopups: () => ipcRenderer.invoke('launcher:close-popups'),
   runDiagnostics: () => ipcRenderer.invoke('diagnostics:collect'),
+  setViewsVisible: (visible) => ipcRenderer.send('launcher:views-visible', visible === true),
   setAutomation: (id, config) => ipcRenderer.invoke('automation:set', { id, config }),
   stopAllAutomation: () => ipcRenderer.invoke('automation:stop-all'),
   riskText: () => ipcRenderer.invoke('automation:risk-text'),

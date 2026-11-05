@@ -297,6 +297,11 @@ ipcMain.on('addon:recon-result', (event, report) => {
   resolve(report);
 });
 
+ipcMain.on('launcher:views-visible', (event, visible) => {
+  if (!isChrome(event.sender)) return;
+  registry.setViewsVisible(visible === true);
+});
+
 ipcMain.handle('diagnostics:collect', async (event) => {
   if (!isChrome(event.sender)) return { ok: false };
   const selectors = [

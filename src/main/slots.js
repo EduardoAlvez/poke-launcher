@@ -109,6 +109,13 @@ export class SlotRegistry {
     this.onPopupChange?.(slot);
   }
 
+  setViewsVisible(visible) {
+    for (const slot of this.slots) {
+      slot.view.setVisible(visible);
+      for (const popup of slot.popups) popup.setVisible(visible);
+    }
+  }
+
   closeAllPopups() {
     let count = 0;
     for (const slot of this.slots) {
