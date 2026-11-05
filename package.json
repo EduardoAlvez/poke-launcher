@@ -1,0 +1,38 @@
+{
+  "name": "poke-launcher",
+  "version": "0.1.0",
+  "description": "Launcher multi-sessao para jogos idle online (pokeidle.io) com sessoes isoladas, bandeja e addons por jogo.",
+  "author": "EduardoAlvez",
+  "homepage": "https://github.com/EduardoAlvez/poke-launcher",
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "src/main/index.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/layout.test.js",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^45.2.3",
+    "electron-builder": "^26.0.0"
+  },
+  "build": {
+    "appId": "dev.pokelauncher.app",
+    "productName": "Poke Launcher",
+    "files": [
+      "src/**/*",
+      "!**/*.map"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "deb"
+      ],
+      "category": "Game"
+    }
+  }
+}

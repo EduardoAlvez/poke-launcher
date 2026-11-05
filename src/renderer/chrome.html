@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'" />
+  <title>Poke Launcher</title>
+  <link rel="stylesheet" href="chrome.css" />
+</head>
+<body>
+  <header id="toolbar">
+    <span class="brand">Poke<span>Launcher</span></span>
+    <div id="chips"></div>
+    <button id="add" title="Nova sessão">+</button>
+    <form id="add-form" hidden>
+      <input id="add-name" placeholder="Nome" maxlength="24" required />
+      <input id="add-url" placeholder="https://pokeidle.io/app" value="https://pokeidle.io/app" />
+      <button type="submit" class="ok">OK</button>
+      <button type="button" id="add-cancel">×</button>
+    </form>
+    <div id="layout-btns">
+      <button data-cols="1" title="1 coluna">▯</button>
+      <button data-cols="2" class="active" title="2 colunas">▯▯</button>
+      <button data-cols="3" title="3 colunas">▯▯▯</button>
+    </div>
+  </header>
+  <script src="chrome.js"></script>
+</body>
+</html>
