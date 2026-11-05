@@ -1,0 +1,132 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {
+  parseState,
+  parseSlot,
+  parseAutomation,
+  defaultState,
+  SlotStore,
+  sweepOrphanPartitions,
+  SCHEMA_VERSION,
+} from '../src/main/store.js';
+
+const validSlot = {
+  id: 'slot-1',
+  name: 'Conta 1',
+  url: 'https://pokeidle.io/app',
+  partition: 'persist:slot-1',
+  ratios: { x: 0, y: 0, w: 1, h: 1 },
+  muted: false,
+  zoomFactor: 1,
+};
+
+test('parseState aceita estado valido', () => {
+  const res = parseState(JSON.stringify({ schemaVersion: SCHEMA_VERSION, maxSlots: 4, slots: [validSlot] }));
+  assert.equal(res.ok, true);
+  assert.equal(res.state.slots.length, 1);
+  assert.equal(res.state.slots[0].name, 'Conta 1');
+  assert.equal(res.state.maxSlots, 4);
+});
+
+test('parseState recusa json quebrado, versao nova, ids duplicados e partition errada', () => {
+  assert.equal(parseState('{nao json').ok, false);
+  assert.equal(parseState(JSON.stringify({ schemaVersion: 99, slots: [] })).ok, false);
+  assert.equal(parseState(JSON.stringify({ schemaVersion: SCHEMA_VERSION, slots: 'x' })).ok, false);
+  assert.equal(
+    parseState(JSON.stringify({ schemaVersion: SCHEMA_VERSION, slots: [validSlot, validSlot] })).ok,
+    false
+  );
+  assert.equal(
+    parseState(
+      JSON.stringify({ schemaVersion: SCHEMA_VERSION, slots: [{ ...validSlot, partition: 'persist:outro' }] })
+    ).ok,
+    false
+  );
+});
+
+test('parseState recusa url nao http(s)', () => {
+  const res = parseState(
+    JSON.stringify({ schemaVersion: SCHEMA_VERSION, slots: [{ ...validSlot, url: 'file:///etc/passwd' }] })
+  );
+  assert.equal(res.ok, false);
+});
+
+test('parseSlot corta nome longo e zera ratios invalidos', () => {
+  const res = parseSlot({ ...validSlot, name: 'x'.repeat(80), ratios: { x: 5, y: 0, w: 1, h: 1 } });
+  assert.equal(res.ok, true);
+  assert.equal(res.slot.name.length, 24);
+  assert.equal(res.slot.ratios, null);
+});
+
+test('automacao e opt-in: enabled so com consent', () => {
+  assert.equal(parseAutomation(undefined).enabled, false);
+  assert.equal(parseAutomation({ enabled: true }).enabled, false);
+  assert.equal(parseAutomation({ enabled: true, consent: true }).enabled, true);
+  assert.equal(parseAutomation({ enabled: true, consent: true, mode: 'until-catch' }).mode, 'until-catch');
+});
+
+test('automacao limita parametros absurdos', () => {
+  const a = parseAutomation({ enabled: true, consent: true, intervalMs: 5, jitterMs: 99999, maxPerMin: 5000 });
+  assert.equal(a.intervalMs, 500);
+  assert.equal(a.jitterMs, 5000);
+  assert.equal(a.maxPerMin, 60);
+});
+
+test('SlotStore: escrita atomica, backup e leitura', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pokestore-'));
+  const file = path.join(dir, 'slots.json');
+  const store = new SlotStore(file);
+  const state = { ...defaultState(), slots: [validSlot] };
+  await store.write(state);
+  const read = await store.read();
+  assert.equal(read.source, 'primary');
+  assert.equal(read.state.slots[0].id, 'slot-1');
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test('SlotStore: corrupcao primaria cai no .bak', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pokestore-'));
+  const file = path.join(dir, 'slots.json');
+  const store = new SlotStore(file);
+  await store.write({ ...defaultState(), slots: [validSlot] });
+  await store.write({ ...defaultState(), slots: [validSlot, { ...validSlot, id: 'slot-2' }] });
+  await fs.writeFile(file, '{quebrado', 'utf8');
+  const read = await store.read();
+  assert.equal(read.source, 'backup');
+  assert.equal(read.state.slots.length, 1);
+  assert.equal(read.warnings.length, 1);
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test('SlotStore: primaria e backup invalidos caem em defaults com aviso', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pokestore-'));
+  const file = path.join(dir, 'slots.json');
+  const store = new SlotStore(file);
+  await fs.writeFile(file, '{lixo', 'utf8');
+  await fs.writeFile(`${file}.bak`, '{tambem lixo', 'utf8');
+  const read = await store.read();
+  assert.equal(read.source, 'defaults');
+  assert.equal(read.state.slots.length, 0);
+  assert.equal(read.warnings.length, 1);
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test('sweepOrphanPartitions remove apenas particoes fora do estado', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pokopart-'));
+  await fs.mkdir(path.join(dir, 'slot-1'), { recursive: true });
+  await fs.mkdir(path.join(dir, 'slot-9'), { recursive: true });
+  await fs.writeFile(path.join(dir, 'nao-e-pasta'), 'x');
+  const res = await sweepOrphanPartitions(dir, ['persist:slot-1'], { log: () => {} });
+  assert.deepEqual(res.removed, ['slot-9']);
+  assert.deepEqual(res.kept, ['slot-1']);
+  assert.equal(await fs.stat(path.join(dir, 'slot-1')).then(() => true), true);
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test('sweepOrphanPartitions tolera raiz inexistente', async () => {
+  const res = await sweepOrphanPartitions(path.join(os.tmpdir(), 'nao-existe-pokolauncher'), [], { log: () => {} });
+  assert.deepEqual(res.removed, []);
+});
