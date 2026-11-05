@@ -5,6 +5,7 @@ import { SlotRegistry } from './slots.js';
 import { SlotStore, sweepOrphanPartitions, defaultState } from './store.js';
 import { Notifier, parseGameEvent } from './notifications.js';
 import { createTray } from './tray.js';
+import { loadPack, buildAddonPreload, applyPackCss, sendPackRules } from './addons.js';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const registry = new SlotRegistry();
@@ -13,6 +14,7 @@ let store = null;
 let persisted = defaultState();
 let trayHandle = null;
 let quitting = false;
+let addonPack = null;
 
 const notifier = new Notifier({
   show: ({ slotId, title, body }) => {
@@ -136,6 +138,21 @@ function showWindow() {
   win.focus();
 }
 
+function wireAddonPack() {
+  if (!addonPack) return;
+  app.on('web-contents-created', (_e, contents) => {
+    if (contents === win?.webContents) return;
+    const apply = () => {
+      if (contents.isDestroyed()) return;
+      applyPackCss(contents, addonPack);
+      sendPackRules(contents, addonPack);
+    };
+    contents.on('dom-ready', apply);
+    contents.on('did-finish-load', apply);
+    contents.on('did-navigate-in-page', apply);
+  });
+}
+
 async function restoreSlots() {
   const toRestore = [...persisted.slots];
   if (toRestore.length === 0) {
@@ -227,6 +244,14 @@ app.whenReady().then(async () => {
     path.join(app.getPath('userData'), 'Partitions'),
     persisted.slots.map((s) => s.partition)
   );
+  try {
+    addonPack = await loadPack();
+    const preloadPath = await buildAddonPreload(path.join(app.getPath('userData'), 'preload'));
+    registry.setAddonPreloadPath(preloadPath);
+    wireAddonPack();
+  } catch (err) {
+    console.error('[addons] pack/preload indisponivel:', err.message);
+  }
   createWindow();
   await restoreSlots();
   trayHandle = createTray({

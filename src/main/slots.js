@@ -1,6 +1,7 @@
 import { WebContentsView } from 'electron';
 import { computeGrid, popupBounds, TOOLBAR_H } from './layout.js';
 import { installSlotExtensions } from './extensions.js';
+import { registerAddonPreload } from './addons.js';
 
 const DEFAULT_URL = 'https://pokeidle.io/app';
 const MAX_SLOTS = 8;
@@ -22,10 +23,15 @@ export class SlotRegistry {
     this.seq = 0;
     this.cols = 2;
     this.win = null;
+    this.addonPreloadPath = null;
   }
 
   attachWindow(win) {
     this.win = win;
+  }
+
+  setAddonPreloadPath(preloadPath) {
+    this.addonPreloadPath = preloadPath;
   }
 
   async add(name, url = DEFAULT_URL, { id, maxSlots = MAX_SLOTS } = {}) {
@@ -40,6 +46,11 @@ export class SlotRegistry {
     view.webContents.on('render-process-gone', () => this.recreate(slot));
     this.bindOpenHandler(slot, view);
     this.slots.push(slot);
+    if (this.addonPreloadPath) {
+      await registerAddonPreload(view.webContents.session, this.addonPreloadPath, url).catch((err) =>
+        console.error(`[${slotId}] preload de addon:`, err.message)
+      );
+    }
     await installSlotExtensions(view.webContents.session, url).catch((err) =>
       console.error(`[${slotId}] extensao indisponivel:`, err.message)
     );

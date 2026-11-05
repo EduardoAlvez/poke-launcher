@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "game": "pokeidle.io",
+  "updatedAt": "2026-11-05",
+  "css": [
+    ".chat-vao { max-height: 32vh !important; }",
+    ".chat-msgs { font-size: 12px !important; line-height: 1.25 !important; }",
+    ".chat-entrada { max-height: 72px !important; }",
+    ".hud-hunt { font-size: 12px !important; }",
+    ".capturas-painel { max-height: 38vh !important; overflow-y: auto !important; }"
+  ],
+  "rules": [
+    {
+      "id": "pokemon-caught",
+      "title": "Capturou",
+      "kind": "event",
+      "debounceMs": 2000,
+      "matchers": [
+        { "kind": "text", "regex": "captur(ou|ado|ou!|ou\\b)", "flags": "i" },
+        { "kind": "text", "regex": "parab[eé]ns.*(captur|pego)", "flags": "i" }
+      ]
+    },
+    {
+      "id": "balls-low",
+      "title": "Bolas acabando",
+      "kind": "counter",
+      "debounceMs": 60000,
+      "pollMs": 5000,
+      "matchers": [
+        { "kind": "selector", "selector": ".cb-quantos", "max": 5 },
+        { "kind": "selector", "selector": ".er-qtd", "max": 5 }
+      ]
+    },
+    {
+      "id": "boss-available",
+      "title": "Boss disponível",
+      "kind": "event",
+      "debounceMs": 30000,
+      "matchers": [
+        { "kind": "text", "regex": "boss\\s+(dispon[ií]vel|disponivel|ativo|liberado|liberou)", "flags": "i" }
+      ]
+    },
+    {
+      "id": "egg-hatched",
+      "title": "Ovo chocado",
+      "kind": "event",
+      "debounceMs": 30000,
+      "matchers": [
+        { "kind": "text", "regex": "ovo\\s+(chocou|chocad|cravou|nasceu)", "flags": "i" }
+      ]
+    }
+  ]
+}
