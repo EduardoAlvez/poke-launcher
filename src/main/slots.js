@@ -114,6 +114,10 @@ export class SlotRegistry {
     this.layout(this.win);
   }
 
+  get(id) {
+    return this.slots.find((s) => s.id === id);
+  }
+
   remove(id) {
     const i = this.slots.findIndex((s) => s.id === id);
     if (i === -1) return false;
