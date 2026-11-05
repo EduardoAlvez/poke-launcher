@@ -232,3 +232,68 @@ test('isEconomy detecta o modo economia pelo seletor do pack', () => {
   assert.equal(isEconomy(doc, {}), false);
   assert.equal(isEconomy({ querySelector: () => null }, { economySelector: 'html.modo-economia' }), false);
 });
+
+test('captura desliga a automacao no main (markStopped)', async () => {
+  const slot = { id: 'slot-1', automation: { enabled: true, consent: true, mode: 'until-catch' } };
+  const sent = [];
+  let persisted = 0;
+  const controller = new AutomationController({
+    getSlot: () => slot,
+    getAllSlots: () => [slot],
+    persist: async () => { persisted += 1; },
+    sendToSlot: (id, payload) => sent.push([id, payload]),
+    log: () => {},
+  });
+  controller.reportStatus('slot-1', { state: 'captured', running: false, throws: 5 });
+  assert.equal(await controller.markStopped('slot-1', 'captured'), true);
+  assert.equal(slot.automation.enabled, false);
+  assert.equal(slot.automation.consent, false);
+  assert.equal(slot.automationStatus.state, 'captured');
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0][1].config.enabled, false);
+  assert.equal(persisted, 1);
+  assert.equal(await controller.markStopped('slot-1', 'captured'), false, 'idempotente');
+});
+
+test('heartbeat reporta ticks, ultimo tick e alvos', () => {
+  const events = [];
+  let tickFn = null;
+  let beatFn = null;
+  const doc = {
+    body: { textContent: '' },
+    defaultView: null,
+    querySelector: () => ({ textContent: '', hidden: false, click: () => {} }),
+    querySelectorAll: () => [{}, {}],
+  };
+  const win = {
+    crypto: { getRandomValues: (arr) => { arr[0] = 1; return arr; } },
+    setTimeout: (fn) => { tickFn = fn; return 1; },
+    clearTimeout: () => {},
+    setInterval: (fn) => { beatFn = fn; return 2; },
+    clearInterval: () => {},
+  };
+  const handle = installAutomation({
+    config: { enabled: true, mode: 'fixed', intervalMs: 500, jitterMs: 0, maxPerMin: 60 },
+    pack: { clickCandidates: ['.x'], countSelector: '.x', pauseSelectors: [], pauseText: [] },
+    emit: (e) => events.push(e),
+    doc,
+    win,
+  });
+  tickFn();
+  assert.equal(handle.getTicks(), 1);
+  const last = events.at(-1);
+  assert.equal(last.ticks, 1);
+  assert.equal(typeof last.lastTickAt, 'number');
+  assert.equal(last.caidos, 2);
+  beatFn();
+  assert.equal(events.at(-1).ticks, 1);
+  handle.stop();
+});
+
+test('isAccountTaken detecta o aviso de sessao tomada', () => {
+  const { isAccountTaken } = globalThis.PokeAutomation;
+  const sel = '#sessao-tomada:not(.hidden)';
+  assert.equal(isAccountTaken({ querySelector: (s) => (s === sel ? {} : null) }, { accountTakenSelector: sel }), true);
+  assert.equal(isAccountTaken({ querySelector: () => null }, { accountTakenSelector: sel }), false);
+  assert.equal(isAccountTaken({ querySelector: () => ({}) }, {}), false);
+});

@@ -92,6 +92,9 @@ function pushState() {
       },
       autoState: s.automationStatus?.state ?? null,
       autoThrows: s.automationStatus?.throws ?? 0,
+      autoTicks: s.automationStatus?.ticks ?? 0,
+      autoLastTick: s.automationStatus?.lastTickAt ?? null,
+      autoCaidos: s.automationStatus?.caidos ?? null,
       popups: s.popups.length,
     }))
   );
@@ -425,6 +428,14 @@ app.on('web-contents-created', (_e, contents) => {
     automation.reportStatus(slot.id, payload);
     slot.automationStatus = payload;
     sendState();
+    if (payload?.running === false && payload?.state === 'captured') {
+      automation
+        .markStopped(slot.id, 'captured')
+        .then((changed) => {
+          if (changed) sendState();
+        })
+        .catch((err) => console.error('[automation] parada pos-captura:', err.message));
+    }
   });
 });
 

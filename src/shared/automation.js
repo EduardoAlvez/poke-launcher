@@ -106,20 +106,46 @@
     }
   }
 
+  function isAccountTaken(doc, pack) {
+    if (!pack?.accountTakenSelector) return false;
+    let el = null;
+    try {
+      el = doc.querySelector(pack.accountTakenSelector);
+    } catch {
+      return false;
+    }
+    return Boolean(el && isVisible(el, doc));
+  }
+
   function installAutomation({ config, pack, emit, doc = root.document, win = root }) {
     let timer = null;
+    let heartbeat = null;
     let throwsInWindow = 0;
     let windowStart = Date.now();
     let total = 0;
+    let ticks = 0;
+    let lastTickAt = null;
     let stopped = false;
     let lastState = null;
 
     const random = () => (win.crypto?.getRandomValues ? win.crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32 : Math.random());
 
+    const countTargets = () => {
+      if (!pack?.countSelector) return null;
+      try {
+        return typeof doc.querySelectorAll === 'function' ? doc.querySelectorAll(pack.countSelector).length : null;
+      } catch {
+        return null;
+      }
+    };
+
+    const emitStatus = (state) =>
+      emit?.({ type: 'automation-status', state, throws: total, running: !stopped, ticks, lastTickAt, caidos: countTargets() });
+
     const report = (state) => {
       if (state === lastState) return;
       lastState = state;
-      emit?.({ type: 'automation-status', state, throws: total, running: !stopped });
+      emitStatus(state);
     };
 
     const schedule = () => {
@@ -131,8 +157,10 @@
     function tick() {
       timer = null;
       if (stopped) return;
+      ticks += 1;
+      lastTickAt = Date.now();
       try {
-        const now = Date.now();
+        const now = lastTickAt;
         if (now - windowStart >= 60_000) {
           windowStart = now;
           throwsInWindow = 0;
@@ -140,6 +168,8 @@
         const limit = Math.max(1, config.maxPerMin ?? 20);
         if (isEconomy(doc, pack)) {
           report('economy-mode');
+        } else if (isAccountTaken(doc, pack)) {
+          report('session-taken');
         } else if (throwsInWindow >= limit) {
           report('rate-limited');
         } else if (isPaused(doc, pack)) {
@@ -168,18 +198,26 @@
       stopped = true;
       if (timer) win.clearTimeout(timer);
       timer = null;
+      if (heartbeat && typeof win.clearInterval === 'function') win.clearInterval(heartbeat);
+      heartbeat = null;
       report(reason);
     };
 
     report('starting');
+    if (typeof win.setInterval === 'function') {
+      heartbeat = win.setInterval(() => {
+        if (!stopped) emitStatus(lastState ?? 'idle');
+      }, 10000);
+    }
     schedule();
 
     return {
       stop,
       getTotal: () => total,
+      getTicks: () => ticks,
       isRunning: () => !stopped,
     };
   }
 
-  root.PokeAutomation = { installAutomation, findFirst, isPaused, isVisible, isClickable, clickTarget, isEconomy };
+  root.PokeAutomation = { installAutomation, findFirst, isPaused, isVisible, isClickable, clickTarget, isEconomy, isAccountTaken };
 })(globalThis);

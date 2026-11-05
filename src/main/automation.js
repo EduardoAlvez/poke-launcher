@@ -71,6 +71,17 @@ export class AutomationController {
     this.log('[automation] parada geral executada');
   }
 
+  async markStopped(slotId, reason = 'stopped') {
+    const slot = this.getSlot(slotId);
+    if (!slot?.automation?.enabled) return false;
+    slot.automation = { ...slot.automation, enabled: false, consent: false };
+    slot.automationStatus = { state: reason, running: false, throws: this.status.get(slotId)?.throws ?? 0 };
+    this.sendToSlot(slotId, { config: slot.automation });
+    this.log(`[automation] ${slotId}: parado (${reason})`);
+    await this.persist();
+    return true;
+  }
+
   allSlots() {
     return this.getAllSlots ? this.getAllSlots() : [];
   }
@@ -79,10 +90,16 @@ export class AutomationController {
     if (!slotId || !payload || typeof payload !== 'object') return;
     if (typeof payload.state !== 'string' || payload.state.length > 32) return;
     const throws = Number.isFinite(payload.throws) ? Math.max(0, Math.min(payload.throws, 1e7)) : 0;
+    const ticks = Number.isFinite(payload.ticks) ? Math.max(0, Math.min(payload.ticks, 1e9)) : 0;
+    const lastTickAt = Number.isFinite(payload.lastTickAt) ? payload.lastTickAt : null;
+    const caidos = Number.isFinite(payload.caidos) ? Math.max(0, Math.min(payload.caidos, 1e6)) : null;
     this.status.set(slotId, {
       state: payload.state,
       running: payload.running === true,
       throws,
+      ticks,
+      lastTickAt,
+      caidos,
     });
   }
 

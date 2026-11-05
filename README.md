@@ -34,12 +34,14 @@ A automação de lançamentos é **opcional, desligada por padrão e exige conse
 Garantias de projeto (não de resultado):
 
 - nunca liga sozinha; sem consentimento, o botão não ativa;
-- tem indicador visível por sessão (`AUTO` aceso) e **Parar automações** na toolbar e na bandeja;
+- tem indicador visível por sessão (`AUTO` aceso, vermelho quando parou) e **Parar automações** na toolbar e na bandeja;
 - o laço roda no mundo isolado da página, com pausa por seletor/texto e limite por minuto;
 - o kill switch interrompe em menos de 500 ms.
 
-Dois modos: **intervalo fixo** e **até capturar** (para após detectar uma captura).
-A automação está incluída na versão gratuita.
+Dois modos: **intervalo fixo** e **até capturar** (para após detectar uma captura). A parada por
+captura é registrada no processo principal: o `AUTO` fica vermelho, a sessão é desligada e é preciso
+marcar o aviso de novo para reativar. Cada sessão usa a própria conta; a mesma conta em dois slots
+derruba a primeira (o jogo fecha a sessão antiga). A automação está incluída na versão gratuita.
 
 ## Requisitos
 

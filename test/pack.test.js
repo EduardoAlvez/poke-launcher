@@ -30,6 +30,8 @@ test('loadAutomationPack mira a lista de proximidade (arremesso manual)', async 
   assert.ok(!p.clickCandidates.includes('.campo-bola'), '.campo-bola e campo do formulario de login');
   assert.ok(!p.clickCandidates.includes('#cena'), 'o palco nao tem handler de clique');
   assert.equal(p.economySelector, 'html.modo-economia');
+  assert.equal(p.countSelector, '#caidos-lista .caido');
+  assert.equal(p.accountTakenSelector, '#sessao-tomada:not(.hidden)');
   assert.equal(p.stopOnRule, 'pokemon-caught');
 });
 

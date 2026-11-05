@@ -68,6 +68,10 @@ button:hover { border-color: var(--accent); }
 .chip .auto:hover { color: var(--accent); border-color: var(--accent); }
 .chip .auto.on { color: #ffb454; border-color: #ffb454; }
 .chip .auto.on[data-state="clicking"] { color: #3fbf7f; border-color: #3fbf7f; }
+.chip .auto[data-state="captured"] { color: #ff6b6b; border-color: #4a2a2f; }
+.chip .auto[data-state="session-taken"] { color: #ff6b6b; border-color: #4a2a2f; }
+.chip .auto[data-stalled="true"] { color: #ff6b6b; border-color: #ff6b6b; }
+.chip .auto.on[data-stalled="true"] { color: #ff6b6b; border-color: #ff6b6b; }
 button.danger { color: #ff6b6b; border-color: #4a2a2f; }
 button.danger:hover { border-color: #ff6b6b; }
 .muted { color: var(--muted); font-size: 11px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

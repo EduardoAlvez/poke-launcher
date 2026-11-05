@@ -1,10 +1,12 @@
 {
-  "version": 4,
+  "version": 5,
   "game": "pokeidle.io",
   "updatedAt": "2026-11-05",
   "clickCandidates": ["#caidos-lista .caido", ".caidos-lista .caido", ".caido"],
-  "pauseSelectors": [],
+  "countSelector": "#caidos-lista .caido",
+  "pauseSelectors": ["#sessao-tomada:not(.hidden)"],
   "pauseText": ["sem bolas", "sem poções", "sem pocoes"],
   "economySelector": "html.modo-economia",
+  "accountTakenSelector": "#sessao-tomada:not(.hidden)",
   "stopOnRule": "pokemon-caught"
 }

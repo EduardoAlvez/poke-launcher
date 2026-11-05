@@ -120,7 +120,9 @@ function openModal(slot) {
   modalInterval.value = slot.automation?.intervalMs ?? 2000;
   modalJitter.value = slot.automation?.jitterMs ?? 800;
   modalMax.value = slot.automation?.maxPerMin ?? 20;
-  modalError.textContent = '';
+  modalError.textContent = slot.autoState === 'captured' && !slot.automation?.enabled
+    ? 'A automacao parou ao capturar. Marque o aviso para ativar de novo.'
+    : '';
   modal.hidden = false;
   window.launcher.setViewsVisible(false);
   (modalConsent.checked ? modalSave : modalConsent).focus();
@@ -167,8 +169,81 @@ document.querySelectorAll('#layout-btns button').forEach((btn) => {
   });
 });
 
+const chipViews = new Map();
+const autoStateLabel = {
+  starting: 'iniciando',
+  clicking: 'lançando',
+  paused: 'pausado',
+  'waiting-button': 'sem alvo na cena',
+  'rate-limited': 'no limite por minuto',
+  'economy-mode': 'Modo Economia (o jogo farma sozinho)',
+  'session-taken': 'sessão tomada em outra aba/dispositivo',
+  captured: 'parou: capturou',
+  error: 'erro',
+};
+
+function autoTitle(s) {
+  const enabled = s.automation?.enabled === true;
+  if (!enabled && s.autoState === 'captured') return 'Parou ao capturar — clique para reativar';
+  if (!enabled) return 'Configurar automacao de lancamentos';
+  const parts = [`Automacao ativa (${s.automation.mode})`, autoStateLabel[s.autoState] ?? 'iniciando', `${s.autoThrows ?? 0} lancamentos`];
+  const age = s.autoLastTick ? Math.round((Date.now() - s.autoLastTick) / 1000) : null;
+  if (age !== null && age > 20) parts.push(`SEM TICKS ha ${age}s`);
+  else if (age !== null) parts.push(`ultimo tick ha ${age}s`);
+  return parts.join(' - ');
+}
+
+function createChip() {
+  const chip = document.createElement('span');
+  chip.className = 'chip';
+  const dot = document.createElement('i');
+  dot.className = 'dot';
+  chip.appendChild(dot);
+  const label = document.createElement('span');
+  chip.appendChild(label);
+  const x = document.createElement('span');
+  x.className = 'x';
+  x.textContent = '×';
+  x.title = 'Fechar sessao';
+  chip.appendChild(x);
+  const auto = document.createElement('button');
+  auto.type = 'button';
+  auto.textContent = 'AUTO';
+  chip.appendChild(auto);
+  const view = { chip, dot, label, auto, slot: null };
+  chip.addEventListener('click', () => view.slot && window.launcher.focusSlot(view.slot.id));
+  x.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (view.slot) window.launcher.removeSlot(view.slot.id);
+  });
+  auto.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (view.slot) openModal(view.slot);
+  });
+  return view;
+}
+
+function updateChip(view, s) {
+  view.slot = s;
+  view.dot.className = s.loggedIn ? 'dot on' : 'dot';
+  view.dot.title = s.loggedIn ? 'Sessao com login ativo' : 'Sem login';
+  view.label.textContent = s.name;
+  const enabled = s.automation?.enabled === true;
+  view.auto.className = `auto${enabled ? ' on' : ''}`;
+  view.auto.dataset.state = s.autoState ?? 'idle';
+  const age = enabled && s.autoLastTick ? Date.now() - s.autoLastTick : null;
+  view.auto.dataset.stalled = age !== null && age > 20000 ? 'true' : 'false';
+  view.auto.title = autoTitle(s);
+}
+
 window.launcher.onState((slots) => {
-  chips.replaceChildren();
+  const ids = new Set(slots.map((s) => s.id));
+  for (const [id, view] of chipViews) {
+    if (ids.has(id)) continue;
+    view.chip.remove();
+    chipViews.delete(id);
+  }
+  for (const el of chips.querySelectorAll('.empty-hint')) el.remove();
   if (slots.length === 0) {
     const hint = document.createElement('span');
     hint.className = 'empty-hint';
@@ -176,54 +251,23 @@ window.launcher.onState((slots) => {
     chips.appendChild(hint);
   }
   for (const s of slots) {
-    const chip = document.createElement('span');
-    chip.className = 'chip';
-    const dot = document.createElement('i');
-    dot.className = s.loggedIn ? 'dot on' : 'dot';
-    dot.title = s.loggedIn ? 'Sessao com login ativo' : 'Sem login';
-    chip.appendChild(dot);
-    const label = document.createElement('span');
-    label.textContent = s.name;
-    chip.appendChild(label);
-    chip.addEventListener('click', () => window.launcher.focusSlot(s.id));
-    const x = document.createElement('span');
-    x.className = 'x';
-    x.textContent = '×';
-    x.title = 'Fechar sessao';
-    x.addEventListener('click', (e) => {
-      e.stopPropagation();
-      window.launcher.removeSlot(s.id);
-    });
-    chip.appendChild(x);
-    const auto = document.createElement('button');
-    auto.type = 'button';
-    auto.className = `auto${s.automation?.enabled ? ' on' : ''}`;
-    auto.textContent = 'AUTO';
-    auto.dataset.state = s.autoState ?? 'idle';
-    const autoStateLabel = {
-      clicking: 'lançando',
-      paused: 'pausado',
-      'waiting-button': 'sem alvo na cena',
-      'rate-limited': 'no limite por minuto',
-      'economy-mode': 'Modo Economia (o jogo farma sozinho)',
-      captured: 'parou: capturou',
-      error: 'erro',
-    };
-    auto.title = s.automation?.enabled
-      ? `Automacao ativa (${s.automation.mode}) - ${autoStateLabel[s.autoState] ?? 'iniciando'} - ${s.autoThrows ?? 0} lancamentos`
-      : 'Configurar automacao de lancamentos';
-    auto.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openModal(s);
-    });
-    chip.appendChild(auto);
-    chips.appendChild(chip);
+    let view = chipViews.get(s.id);
+    if (!view) {
+      view = createChip();
+      chipViews.set(s.id, view);
+      chips.appendChild(view.chip);
+    }
+    updateChip(view, s);
   }
   const anyAuto = slots.some((s) => s.automation?.enabled);
   stopAllBtn.hidden = !anyAuto;
   const popups = slots.reduce((n, s) => n + (s.popups ?? 0), 0);
   closePopupsBtn.hidden = popups === 0;
 });
+
+setInterval(() => {
+  for (const view of chipViews.values()) if (view.slot) updateChip(view, view.slot);
+}, 1000);
 
 const hint = document.createElement('span');
 hint.className = 'empty-hint';
