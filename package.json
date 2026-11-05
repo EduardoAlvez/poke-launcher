@@ -25,11 +25,13 @@
       "!**/*.map"
     ],
     "win": {
+      "icon": "assets/icon-256.png",
       "target": [
         "nsis"
       ]
     },
     "linux": {
+      "icon": "assets/icon-256.png",
       "target": [
         "deb"
       ],
