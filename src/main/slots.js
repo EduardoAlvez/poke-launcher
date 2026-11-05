@@ -24,6 +24,8 @@ export class SlotRegistry {
     this.cols = 2;
     this.win = null;
     this.addonPreloadPath = null;
+    this.closingPopups = new WeakSet();
+    this.onPopupChange = null;
   }
 
   attachWindow(win) {
@@ -79,15 +81,24 @@ export class SlotRegistry {
       popup.webContents.on('render-process-gone', () => this.closePopup(slot, popup));
       popup.webContents.on('close', () => this.closePopup(slot, popup));
       popup.webContents.once('destroyed', () => this.closePopup(slot, popup));
+      popup.webContents.on('before-input-event', (event, input) => {
+        if (input.type === 'keyDown' && input.key === 'Escape') {
+          event.preventDefault();
+          this.closePopup(slot, popup);
+        }
+      });
       this.bindOpenHandler(slot, popup);
       this.win.contentView.addChildView(popup);
       popup.webContents.loadURL(parsed.href);
       this.layout(this.win);
+      this.onPopupChange?.(slot);
       return { action: 'deny' };
     });
   }
 
   closePopup(slot, popup) {
+    if (!popup || this.closingPopups.has(popup)) return;
+    this.closingPopups.add(popup);
     const i = slot.popups.indexOf(popup);
     if (i !== -1) slot.popups.splice(i, 1);
     if (this.win && !this.win.isDestroyed() && this.win.contentView.children.includes(popup)) {
@@ -95,6 +106,18 @@ export class SlotRegistry {
     }
     if (!popup.webContents.isDestroyed()) popup.webContents.close();
     if (this.win && !this.win.isDestroyed()) this.layout(this.win);
+    this.onPopupChange?.(slot);
+  }
+
+  closeAllPopups() {
+    let count = 0;
+    for (const slot of this.slots) {
+      for (const popup of [...slot.popups]) {
+        this.closePopup(slot, popup);
+        count += 1;
+      }
+    }
+    return count;
   }
 
   recreate(slot) {

@@ -1,15 +1,17 @@
 import path from 'node:path';
+import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, ipcMain, Notification, session } from 'electron';
 import { SlotRegistry } from './slots.js';
 import { SlotStore, sweepOrphanPartitions, defaultState, buildSnapshot } from './store.js';
 import { Notifier, parseGameEvent } from './notifications.js';
 import { createTray } from './tray.js';
-import { loadPack, buildAddonPreload, applyPackCss, sendPackRules, loadAutomationPack, auditPack } from './addons.js';
+import { loadPack, buildAddonPreload, applyPackCss, sendPackRules, loadAutomationPack, auditPack, collectSelectors } from './addons.js';
 import { AutomationController, RISK_TEXT } from './automation.js';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const registry = new SlotRegistry();
+registry.onPopupChange = () => sendState();
 let win = null;
 let store = null;
 let persisted = defaultState();
@@ -90,6 +92,7 @@ function pushState() {
       },
       autoState: s.automationStatus?.state ?? null,
       autoThrows: s.automationStatus?.throws ?? 0,
+      popups: s.popups.length,
     }))
   );
   const anyAuto = registry.slots.filter((s) => s.automation?.enabled).length;
@@ -283,6 +286,50 @@ ipcMain.on('launcher:focus-slot', (event, payload) => {
   if (!isChrome(event.sender)) return;
   const slot = registry.get(payload?.id);
   slot?.view.webContents.focus();
+});
+
+const reconWaiters = new Map();
+
+ipcMain.on('addon:recon-result', (event, report) => {
+  const resolve = reconWaiters.get(event.sender.id);
+  if (!resolve) return;
+  reconWaiters.delete(event.sender.id);
+  resolve(report);
+});
+
+ipcMain.handle('diagnostics:collect', async (event) => {
+  if (!isChrome(event.sender)) return { ok: false };
+  const selectors = [
+    ...collectSelectors(addonPack),
+    ...(automationPack?.clickCandidates ?? []),
+    ...(automationPack?.pauseSelectors ?? []),
+  ];
+  const slots = {};
+  for (const slot of registry.slots) {
+    const wc = slot.view.webContents;
+    if (wc.isDestroyed()) continue;
+    slots[slot.id] = await new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        reconWaiters.delete(wc.id);
+        resolve({ ok: false, error: 'timeout' });
+      }, 4000);
+      reconWaiters.set(wc.id, (report) => {
+        clearTimeout(timer);
+        resolve({ ok: true, report });
+      });
+      wc.send('addon:recon', { selectors });
+    });
+  }
+  const file = path.join(app.getPath('userData'), 'diagnostico.json');
+  await fs.writeFile(file, JSON.stringify({ at: new Date().toISOString(), selectors, slots }, null, 2), 'utf8');
+  return { ok: true, file, slots: Object.keys(slots).length };
+});
+
+ipcMain.handle('launcher:close-popups', (event) => {
+  if (!isChrome(event.sender)) return 0;
+  const count = registry.closeAllPopups();
+  sendState();
+  return count;
 });
 
 ipcMain.handle('automation:set', async (event, payload) => {

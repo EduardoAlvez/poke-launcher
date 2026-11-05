@@ -57,10 +57,18 @@ test('area minuscula retorna vazio em vez de rect negativa', () => {
   assert.deepEqual(computeGrid(2, { width: 10, height: 10 }, { cols: 2 }), []);
 });
 
-test('popupBounds respeita toolbar e margens', () => {
-  const p = popupBounds({ width: 800, height: 600 });
-  assert.equal(p.x, 8);
-  assert.equal(p.y, TOOLBAR_H + 8);
-  assert.equal(p.width, 800 - 16);
-  assert.equal(p.height, 600 - TOOLBAR_H - 16);
+test('popupBounds fica centralizado, abaixo da toolbar e limitado', () => {
+  const p = popupBounds({ width: 1600, height: 1000 });
+  assert.ok(p.y >= TOOLBAR_H);
+  assert.ok(p.width <= 720);
+  assert.ok(p.height <= 820);
+  assert.equal(p.x, Math.round((1600 - p.width) / 2));
+  assert.ok(p.x >= 0);
+});
+
+test('popupBounds nao estoura janela pequena', () => {
+  const p = popupBounds({ width: 400, height: 300 });
+  assert.ok(p.x >= 0 && p.y >= TOOLBAR_H);
+  assert.ok(p.x + p.width <= 400);
+  assert.ok(p.y + p.height <= 300);
 });

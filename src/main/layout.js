@@ -23,11 +23,15 @@ export function computeGrid(count, contentBounds, { cols, gap = 8, topOffset = T
   return rects;
 }
 
-export function popupBounds(contentBounds, { gap = 8, topOffset = TOOLBAR_H } = {}) {
+export function popupBounds(contentBounds, { gap = 8, topOffset = TOOLBAR_H, maxWidth = 720, maxHeight = 820 } = {}) {
+  const availWidth = Math.max(0, contentBounds.width - gap * 2);
+  const availHeight = Math.max(0, contentBounds.height - topOffset - gap * 2);
+  const width = Math.min(availWidth, maxWidth);
+  const height = Math.min(availHeight, maxHeight);
   return {
-    x: gap,
-    y: topOffset + gap,
-    width: contentBounds.width - gap * 2,
-    height: contentBounds.height - topOffset - gap * 2,
+    x: Math.round((contentBounds.width - width) / 2),
+    y: topOffset + Math.round((contentBounds.height - topOffset - height) / 2),
+    width,
+    height,
   };
 }

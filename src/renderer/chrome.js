@@ -15,6 +15,9 @@ const modalMax = document.getElementById('modal-max');
 const modalError = document.getElementById('modal-error');
 const modalSave = document.getElementById('modal-save');
 const stopAllBtn = document.getElementById('stop-all');
+const closePopupsBtn = document.getElementById('close-popups');
+const diagBtn = document.getElementById('diagnostics');
+const diagStatus = document.getElementById('diag-status');
 let editingSlot = null;
 let riskReady = false;
 
@@ -36,6 +39,7 @@ window.launcher
 document.getElementById('modal-cancel').addEventListener('click', closeModal);
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !modal.hidden) closeModal();
+  else if (e.key === 'Escape' && !closePopupsBtn.hidden) window.launcher.closePopups();
 });
 modal.addEventListener('click', (e) => {
   if (e.target === modal) closeModal();
@@ -89,6 +93,23 @@ function disableSlotAutomation(slot) {
 
 stopAllBtn.addEventListener('click', async () => {
   await window.launcher.stopAllAutomation();
+});
+
+closePopupsBtn.addEventListener('click', async () => {
+  await window.launcher.closePopups();
+});
+
+diagBtn.addEventListener('click', async () => {
+  diagBtn.disabled = true;
+  diagStatus.textContent = 'coletando…';
+  try {
+    const res = await window.launcher.runDiagnostics();
+    diagStatus.textContent = res?.ok ? `salvo em ${res.file}` : 'falhou';
+  } catch {
+    diagStatus.textContent = 'falhou';
+  } finally {
+    diagBtn.disabled = false;
+  }
 });
 
 function openModal(slot) {
@@ -189,6 +210,8 @@ window.launcher.onState((slots) => {
   }
   const anyAuto = slots.some((s) => s.automation?.enabled);
   stopAllBtn.hidden = !anyAuto;
+  const popups = slots.reduce((n, s) => n + (s.popups ?? 0), 0);
+  closePopupsBtn.hidden = popups === 0;
 });
 
 const hint = document.createElement('span');

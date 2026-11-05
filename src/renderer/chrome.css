@@ -70,7 +70,7 @@ button:hover { border-color: var(--accent); }
 .chip .auto.on[data-state="clicking"] { color: #3fbf7f; border-color: #3fbf7f; }
 button.danger { color: #ff6b6b; border-color: #4a2a2f; }
 button.danger:hover { border-color: #ff6b6b; }
-.muted { color: var(--muted); }
+.muted { color: var(--muted); font-size: 11px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #modal {
   position: fixed; inset: 0; background: #0b0d11cc;
   display: flex; align-items: center; justify-content: center; z-index: 10;
