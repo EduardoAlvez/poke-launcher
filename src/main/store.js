@@ -106,6 +106,9 @@ export class SlotStore {
       console.error(`[store] ${warning}`);
       return { state: backup.state, source: 'backup', warnings: [warning] };
     }
+    if (primary.error === 'arquivo inexistente') {
+      return { state: defaultState(), source: 'defaults', warnings: [] };
+    }
     const warning = `slots.json invalido (${primary.error}) e backup invalido (${backup.error}); usando padroes`;
     console.error(`[store] ${warning}`);
     return { state: defaultState(), source: 'defaults', warnings: [warning] };

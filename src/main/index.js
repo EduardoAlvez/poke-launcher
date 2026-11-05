@@ -1,22 +1,65 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, session } from 'electron';
 import { SlotRegistry } from './slots.js';
+import { SlotStore, sweepOrphanPartitions, defaultState } from './store.js';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const registry = new SlotRegistry();
 let win = null;
+let store = null;
+let persisted = defaultState();
 
 function sendState() {
   if (!win || win.isDestroyed()) return;
   win.webContents.send(
     'launcher:state',
-    registry.slots.map((s) => ({ id: s.id, name: s.name, url: s.url }))
+    registry.slots.map((s) => ({
+      id: s.id,
+      name: s.name,
+      url: s.url,
+      loggedIn: s.loggedIn === true,
+    }))
   );
 }
 
 function isChrome(sender) {
   return !!win && !win.isDestroyed() && sender === win.webContents;
+}
+
+function snapshot() {
+  return {
+    ...persisted,
+    slots: registry.slots.map((s) => {
+      const prev = persisted.slots.find((p) => p.id === s.id) ?? {};
+      return {
+        id: s.id,
+        name: s.name,
+        url: s.url,
+        partition: `persist:${s.id}`,
+        ratios: prev.ratios ?? null,
+        muted: s.muted === true,
+        zoomFactor: s.zoomFactor ?? 1,
+        automation: prev.automation ?? null,
+      };
+    }),
+  };
+}
+
+async function persist() {
+  persisted = snapshot();
+  await store.write(persisted);
+}
+
+async function refreshLoginBadge(slot) {
+  if (!slot || slot.view.webContents.isDestroyed()) return;
+  try {
+    const cookies = await session.fromPartition(`persist:${slot.id}`).cookies.get({ url: slot.url });
+    slot.loggedIn = cookies.length > 0;
+  } catch {
+    slot.loggedIn = false;
+  }
+  sendState();
 }
 
 function createWindow() {
@@ -41,10 +84,36 @@ function createWindow() {
     registry.destroyAll();
     win = null;
   });
-
-  registry.add('Conta 1').catch((err) => console.error('add Conta 1:', err.message));
-  registry.add('Conta 2').catch((err) => console.error('add Conta 2:', err.message));
   win.webContents.once('did-finish-load', sendState);
+}
+
+async function restoreSlots() {
+  const toRestore = [...persisted.slots];
+  if (toRestore.length === 0) {
+    try {
+      await registry.add('Conta 1', 'https://pokeidle.io/app', { maxSlots: persisted.maxSlots });
+      await persist();
+    } catch (err) {
+      console.error('[restore] slot padrao:', err.message);
+    }
+  }
+  for (const slot of toRestore) {
+    try {
+      await registry.add(slot.name, slot.url, { id: slot.id, maxSlots: persisted.maxSlots });
+      const created = registry.get(slot.id);
+      if (created) {
+        created.muted = slot.muted;
+        created.zoomFactor = slot.zoomFactor;
+        if (slot.automation) created.automation = slot.automation;
+      }
+    } catch (err) {
+      console.error(`[restore] slot ${slot.id}:`, err.message);
+    }
+  }
+  sendState();
+  for (const slot of registry.slots) {
+    setTimeout(() => refreshLoginBadge(slot), 4000);
+  }
 }
 
 ipcMain.handle('launcher:add-slot', async (event, payload) => {
@@ -58,15 +127,30 @@ ipcMain.handle('launcher:add-slot', async (event, payload) => {
     throw new Error('URL invalida');
   }
   if (!/^https?:$/.test(parsed.protocol)) throw new Error('Somente http(s)');
-  await registry.add(name, parsed.href);
+  if (registry.slots.length >= persisted.maxSlots) {
+    throw new Error(`Limite de ${persisted.maxSlots} sessoes no plano atual`);
+  }
+  await registry.add(name, parsed.href, { maxSlots: persisted.maxSlots });
+  await persist();
   sendState();
   return registry.slots.length;
 });
 
-ipcMain.handle('launcher:remove-slot', (event, payload) => {
+ipcMain.handle('launcher:remove-slot', async (event, payload) => {
   if (!isChrome(event.sender)) return;
   registry.remove(payload?.id);
+  await persist();
   sendState();
+});
+
+ipcMain.handle('launcher:rename-slot', async (event, payload) => {
+  if (!isChrome(event.sender)) return;
+  const slot = registry.get(payload?.id);
+  if (!slot) return false;
+  slot.name = String(payload?.name ?? slot.name).slice(0, 24) || slot.id;
+  await persist();
+  sendState();
+  return true;
 });
 
 ipcMain.handle('launcher:set-layout', (event, payload) => {
@@ -84,8 +168,16 @@ ipcMain.on('launcher:focus-slot', (event, payload) => {
   slot?.view.webContents.focus();
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  store = new SlotStore(path.join(app.getPath('userData'), 'slots.json'));
+  const loaded = await store.read();
+  persisted = loaded.state;
+  await sweepOrphanPartitions(
+    path.join(app.getPath('userData'), 'Partitions'),
+    persisted.slots.map((s) => s.partition)
+  );
   createWindow();
+  await restoreSlots();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

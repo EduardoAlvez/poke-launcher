@@ -28,16 +28,20 @@ export class SlotRegistry {
     this.win = win;
   }
 
-  async add(name, url = DEFAULT_URL) {
-    if (this.slots.length >= MAX_SLOTS) throw new Error(`Limite de ${MAX_SLOTS} sessoes`);
-    const id = `slot-${++this.seq}`;
-    const view = makeView(id);
-    const slot = { id, name: name || id, url, view, popups: [], crashes: [] };
+  async add(name, url = DEFAULT_URL, { id, maxSlots = MAX_SLOTS } = {}) {
+    if (this.slots.length >= maxSlots) throw new Error(`Limite de ${maxSlots} sessoes`);
+    const slotId = id || `slot-${++this.seq}`;
+    if (id) {
+      const n = Number(id.replace('slot-', ''));
+      if (Number.isFinite(n) && n > this.seq) this.seq = n;
+    }
+    const view = makeView(slotId);
+    const slot = { id: slotId, name: name || slotId, url, view, popups: [], crashes: [] };
     view.webContents.on('render-process-gone', () => this.recreate(slot));
     this.bindOpenHandler(slot, view);
     this.slots.push(slot);
     await installSlotExtensions(view.webContents.session, url).catch((err) =>
-      console.error(`[${id}] extensao indisponivel:`, err.message)
+      console.error(`[${slotId}] extensao indisponivel:`, err.message)
     );
     if (!this.slots.includes(slot)) return slot;
     if (this.win && !this.win.isDestroyed()) {

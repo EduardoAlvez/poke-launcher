@@ -3,6 +3,7 @@ const form = document.getElementById('add-form');
 const addBtn = document.getElementById('add');
 const nameInput = document.getElementById('add-name');
 const urlInput = document.getElementById('add-url');
+const error = document.getElementById('add-error');
 
 addBtn.addEventListener('click', () => {
   form.hidden = false;
@@ -12,9 +13,12 @@ addBtn.addEventListener('click', () => {
 document.getElementById('add-cancel').addEventListener('click', closeForm);
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
+  error.textContent = '';
+  urlInput.style.borderColor = '';
   try {
     await window.launcher.addSlot(nameInput.value.trim(), urlInput.value.trim());
   } catch (err) {
+    error.textContent = err.message || 'Falha ao criar sessao';
     urlInput.style.borderColor = '#ff6b6b';
     return;
   }
@@ -47,12 +51,18 @@ window.launcher.onState((slots) => {
   for (const s of slots) {
     const chip = document.createElement('span');
     chip.className = 'chip';
-    chip.textContent = s.name;
+    const dot = document.createElement('i');
+    dot.className = s.loggedIn ? 'dot on' : 'dot';
+    dot.title = s.loggedIn ? 'Sessao com login ativo' : 'Sem login';
+    chip.appendChild(dot);
+    const label = document.createElement('span');
+    label.textContent = s.name;
+    chip.appendChild(label);
     chip.addEventListener('click', () => window.launcher.focusSlot(s.id));
     const x = document.createElement('span');
     x.className = 'x';
     x.textContent = '×';
-    x.title = 'Fechar sessão';
+    x.title = 'Fechar sessao';
     x.addEventListener('click', (e) => {
       e.stopPropagation();
       window.launcher.removeSlot(s.id);

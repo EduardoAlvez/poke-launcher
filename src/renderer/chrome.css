@@ -34,6 +34,11 @@ body {
   white-space: nowrap;
 }
 .chip:hover { border-color: var(--accent); }
+.dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #3a4152; display: inline-block;
+}
+.dot.on { background: #3fbf7f; box-shadow: 0 0 6px #3fbf7f88; }
 .chip .x { color: var(--muted); font-weight: 700; padding: 0 2px; border-radius: 4px; }
 .chip .x:hover { color: #ff6b6b; background: #00000040; }
 button {
@@ -55,3 +60,4 @@ button:hover { border-color: var(--accent); }
 #layout-btns { display: flex; gap: 4px; }
 #layout-btns button.active { border-color: var(--accent); color: var(--accent); }
 .empty-hint { color: var(--muted); padding: 12px; }
+.error { color: #ff6b6b; font-size: 12px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
