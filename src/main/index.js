@@ -1,14 +1,39 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { app, BrowserWindow, ipcMain, session } from 'electron';
+import { app, BrowserWindow, ipcMain, Notification, session } from 'electron';
 import { SlotRegistry } from './slots.js';
 import { SlotStore, sweepOrphanPartitions, defaultState } from './store.js';
+import { Notifier, parseGameEvent } from './notifications.js';
+import { createTray } from './tray.js';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const registry = new SlotRegistry();
 let win = null;
 let store = null;
 let persisted = defaultState();
+let trayHandle = null;
+let quitting = false;
+
+const notifier = new Notifier({
+  show: ({ slotId, title, body }) => {
+    if (!Notification.isSupported()) return;
+    const slot = registry.get(slotId);
+    const notification = new Notification({
+      title: title || slot?.name || 'Poke Launcher',
+      body,
+      groupId: `slot-${slotId}`,
+      silent: false,
+    });
+    notification.on('click', () => {
+      if (win && !win.isDestroyed()) {
+        win.show();
+        win.focus();
+      }
+      slot?.view.webContents.focus();
+    });
+    notification.show();
+  },
+});
 
 function sendState() {
   if (!win || win.isDestroyed()) return;
@@ -80,11 +105,35 @@ function createWindow() {
   win.loadFile(path.join(dirname, '../renderer/chrome.html'));
   registry.attachWindow(win);
   win.on('resize', () => registry.layout(win));
+  win.on('close', (event) => {
+    if (quitting) return;
+    event.preventDefault();
+    win.hide();
+  });
   win.on('closed', () => {
     registry.destroyAll();
     win = null;
   });
   win.webContents.once('did-finish-load', sendState);
+  const selfTestHide = Number(process.env.POKE_SELFTEST_HIDE);
+  if (selfTestHide > 0) {
+    setTimeout(() => win?.close(), selfTestHide * 1000);
+  }
+  const selfTestNotify = Number(process.env.POKE_SELFTEST_NOTIFY);
+  if (selfTestNotify > 0) {
+    setTimeout(() => {
+      const slotId = registry.slots[0]?.id;
+      if (!slotId) return;
+      notifier.notify(slotId, { type: 'selftest', title: 'Poke Launcher', body: 'Toast de teste', ts: Date.now() });
+    }, selfTestNotify * 1000);
+  }
+}
+
+function showWindow() {
+  if (!win || win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
 }
 
 async function restoreSlots() {
@@ -169,6 +218,8 @@ ipcMain.on('launcher:focus-slot', (event, payload) => {
 });
 
 app.whenReady().then(async () => {
+  app.setAppUserModelId(app.isPackaged ? 'dev.pokelauncher.app' : process.execPath);
+  Notification.handleActivation?.(() => showWindow());
   store = new SlotStore(path.join(app.getPath('userData'), 'slots.json'));
   const loaded = await store.read();
   persisted = loaded.state;
@@ -178,8 +229,21 @@ app.whenReady().then(async () => {
   );
   createWindow();
   await restoreSlots();
+  trayHandle = createTray({
+    iconPath: path.join(dirname, '../../assets/icon.png'),
+    onShow: showWindow,
+    onToggleMute: (muted) => {
+      notifier.muted = muted;
+    },
+    isMuted: notifier.muted,
+    onQuit: () => {
+      quitting = true;
+      app.quit();
+    },
+  });
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    else showWindow();
   });
 });
 
@@ -189,8 +253,19 @@ app.on('web-contents-created', (_e, contents) => {
       event.preventDefault();
     }
   });
+  contents.ipc?.on('game-event', (_event, payload) => {
+    const slot = registry.findByWebContentsId(contents.id);
+    if (!slot) return;
+    const parsed = parseGameEvent(payload);
+    if (!parsed.ok) return;
+    notifier.notify(slot.id, parsed.event);
+  });
+});
+
+app.on('before-quit', () => {
+  quitting = true;
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  // app continua vivo na bandeja; a saida acontece pelo menu da bandeja
 });

@@ -21,6 +21,7 @@
     "productName": "Poke Launcher",
     "files": [
       "src/**/*",
+      "assets/**/*",
       "!**/*.map"
     ],
     "win": {

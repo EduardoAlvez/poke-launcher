@@ -122,6 +122,16 @@ export class SlotRegistry {
     return this.slots.find((s) => s.id === id);
   }
 
+  findByWebContentsId(webContentsId) {
+    for (const slot of this.slots) {
+      if (slot.view.webContents.id === webContentsId) return slot;
+      for (const popup of slot.popups) {
+        if (popup.webContents.id === webContentsId) return slot;
+      }
+    }
+    return null;
+  }
+
   remove(id) {
     const i = this.slots.findIndex((s) => s.id === id);
     if (i === -1) return false;
