@@ -10,6 +10,7 @@ const CWS_URL =
 const HOSTS = ['pokeidle.io'];
 const CACHE_MS = 24 * 60 * 60 * 1000;
 const loaded = new WeakSet();
+let liveLoads = 0;
 
 function matchesGame(slotUrl) {
   let host;
@@ -53,6 +54,14 @@ async function downloadCrx(destDir, markerPath) {
 
 async function ensureExtensionDir(destDir, markerPath) {
   if (await freshInfo(markerPath)) return;
+  if (liveLoads > 0) {
+    try {
+      await fs.access(destDir);
+      return;
+    } catch {
+      // sem diretorio e sem cache: precisa baixar mesmo com sessoes vivas (novas)
+    }
+  }
   if (ensureExtensionDir.pending) return ensureExtensionDir.pending;
   ensureExtensionDir.pending = downloadCrx(destDir, markerPath)
     .finally(() => {
@@ -69,5 +78,6 @@ export async function installSlotExtensions(session, slotUrl) {
   await ensureExtensionDir(destDir, markerPath);
   const ext = await session.loadExtension(destDir, { allowFileAccess: false, hotReload: false });
   loaded.add(session);
+  liveLoads += 1;
   console.log(`[extensions] ${ext.name} v${ext.version} carregada`);
 }

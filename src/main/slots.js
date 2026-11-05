@@ -39,6 +39,7 @@ export class SlotRegistry {
     await installSlotExtensions(view.webContents.session, url).catch((err) =>
       console.error(`[${id}] extensao indisponivel:`, err.message)
     );
+    if (!this.slots.includes(slot)) return slot;
     if (this.win && !this.win.isDestroyed()) {
       this.win.contentView.addChildView(view);
       view.webContents.loadURL(url);
@@ -57,9 +58,11 @@ export class SlotRegistry {
       }
       if (!/^https?:$/.test(parsed.protocol)) return { action: 'deny' };
       if (!this.win || this.win.isDestroyed()) return { action: 'deny' };
+      if (slot.popups.length >= 3) return { action: 'deny' };
       const popup = makeView(slot.id);
       slot.popups.push(popup);
       popup.webContents.on('render-process-gone', () => this.closePopup(slot, popup));
+      popup.webContents.on('close', () => this.closePopup(slot, popup));
       popup.webContents.once('destroyed', () => this.closePopup(slot, popup));
       this.bindOpenHandler(slot, popup);
       this.win.contentView.addChildView(popup);
@@ -85,8 +88,13 @@ export class SlotRegistry {
     slot.crashes = slot.crashes.filter((t) => now - t < 60_000);
     slot.crashes.push(now);
     if (slot.crashes.length >= 3) {
+      if (slot.cooldownAt && now < slot.cooldownAt) return;
+      slot.cooldownAt = now + 30_000;
       console.error(`[${slot.id}] 3 quedas em 60s — nova tentativa em 30s`);
-      setTimeout(() => this.recreateNow(slot), 30_000);
+      setTimeout(() => {
+        slot.cooldownAt = 0;
+        this.recreate(slot);
+      }, 30_000);
     } else {
       this.recreateNow(slot);
     }

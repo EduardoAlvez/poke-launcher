@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeGrid } from '../src/main/layout.js';
+import { computeGrid, popupBounds, TOOLBAR_H } from '../src/main/layout.js';
 
 const bounds = { width: 808, height: 608 };
 
@@ -55,4 +55,12 @@ test('todos os rects dentro do conteudo e com gap minimo', () => {
 
 test('area minuscula retorna vazio em vez de rect negativa', () => {
   assert.deepEqual(computeGrid(2, { width: 10, height: 10 }, { cols: 2 }), []);
+});
+
+test('popupBounds respeita toolbar e margens', () => {
+  const p = popupBounds({ width: 800, height: 600 });
+  assert.equal(p.x, 8);
+  assert.equal(p.y, TOOLBAR_H + 8);
+  assert.equal(p.width, 800 - 16);
+  assert.equal(p.height, 600 - TOOLBAR_H - 16);
 });
