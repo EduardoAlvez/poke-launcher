@@ -1,10 +1,10 @@
 {
-  "version": 2,
+  "version": 4,
   "game": "pokeidle.io",
   "updatedAt": "2026-11-05",
-  "clickCandidates": [".campo-bola button", ".campo-bola .ptl-bola", ".campo-bola", ".ptl-bola"],
-  "pauseSelectors": [".capturas-painel:not(.hidden)", ".hunt-saida:not(.hidden)", ".arena-saida:not(.hidden)"],
-  "pauseWithin": ".hud-hunt",
+  "clickCandidates": ["#caidos-lista .caido", ".caidos-lista .caido", ".caido"],
+  "pauseSelectors": [],
   "pauseText": ["sem bolas", "sem poções", "sem pocoes"],
+  "economySelector": "html.modo-economia",
   "stopOnRule": "pokemon-caught"
 }

@@ -59,12 +59,49 @@ ipcRenderer.on('addon:recon', (_event, payload) => {
     discovered.push(describe(el));
     if (discovered.length >= 80) break;
   }
+  const probe = {};
+  for (const selector of Array.isArray(payload?.probes) ? payload.probes.slice(0, 30) : []) {
+    try {
+      const el = document.querySelector(selector);
+      if (!el) {
+        probe[selector] = null;
+        continue;
+      }
+      const chain = [];
+      let node = el;
+      for (let i = 0; i < 6 && node; i += 1, node = node.parentElement) {
+        const cls = typeof node.className === 'string' && node.className ? `.${node.className.split(/\s+/).join('.')}` : '';
+        chain.push(`${node.tagName.toLowerCase()}${node.id ? `#${node.id}` : ''}${cls}`);
+      }
+      probe[selector] = {
+        ...describe(el),
+        cursor: getComputedStyle(el).cursor,
+        html: el.outerHTML.slice(0, 300),
+        chain,
+        attrs: [...el.attributes].slice(0, 12).map((a) => `${a.name}=${String(a.value).slice(0, 60)}`),
+      };
+    } catch (err) {
+      probe[selector] = { error: String(err?.message ?? err) };
+    }
+  }
+  const palco = document.querySelector('#palco');
+  const interactive = [];
+  if (palco) {
+    for (const el of palco.querySelectorAll('button, [role="button"], canvas, a, input[type="button"]')) {
+      interactive.push(describe(el));
+      if (interactive.length >= 40) break;
+    }
+  }
   ipcRenderer.send('addon:recon-result', {
     href: location.href,
     title: document.title,
     ready: document.readyState,
+    economy: document.documentElement.classList.contains('modo-economia'),
     found,
     discovered,
+    probe,
+    palcoHtml: palco ? palco.outerHTML.slice(0, 4000) : null,
+    interactive,
   });
 });
 

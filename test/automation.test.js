@@ -206,3 +206,29 @@ test('pauseWithin limita a busca de texto e parseCount entende numeros', async (
   assert.equal(isPaused(doc, { pauseText: ['sem bolas'] }), true);
   assert.equal(isPaused(doc, { pauseText: ['sem bolas'], pauseWithin: '.nao-existe' }), true);
 });
+
+test('clickTarget dispara sequencia de ponteiro no canvas e click() em botoes', () => {
+  const { clickTarget } = globalThis.PokeAutomation;
+  const seen = [];
+  const canvas = {
+    tagName: 'CANVAS',
+    getBoundingClientRect: () => ({ left: 10, top: 20, width: 100, height: 50 }),
+    dispatchEvent: (ev) => { seen.push(ev.type); return true; },
+  };
+  assert.equal(clickTarget(canvas, {}), true);
+  assert.deepEqual(seen, ['pointermove', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']);
+
+  let clicked = false;
+  const button = { tagName: 'BUTTON', click: () => { clicked = true; } };
+  assert.equal(clickTarget(button, {}), true);
+  assert.equal(clicked, true);
+  assert.equal(clickTarget(null, {}), false);
+});
+
+test('isEconomy detecta o modo economia pelo seletor do pack', () => {
+  const { isEconomy } = globalThis.PokeAutomation;
+  const doc = { querySelector: (s) => (s === 'html.modo-economia' ? {} : null) };
+  assert.equal(isEconomy(doc, { economySelector: 'html.modo-economia' }), true);
+  assert.equal(isEconomy(doc, {}), false);
+  assert.equal(isEconomy({ querySelector: () => null }, { economySelector: 'html.modo-economia' }), false);
+});

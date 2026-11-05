@@ -73,6 +73,39 @@
     return false;
   }
 
+  function clickTarget(el, doc) {
+    if (!el) return false;
+    if (el.tagName === 'CANVAS' && typeof el.getBoundingClientRect === 'function') {
+      const rect = el.getBoundingClientRect();
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      const view = doc?.defaultView ?? root;
+      const Ctor = view.MouseEvent;
+      for (const type of ['pointermove', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+        try {
+          el.dispatchEvent(Ctor ? new Ctor(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 }) : { type });
+        } catch {
+          /* evento indisponivel */
+        }
+      }
+      return true;
+    }
+    if (typeof el.click === 'function') {
+      el.click();
+      return true;
+    }
+    return false;
+  }
+
+  function isEconomy(doc, pack) {
+    if (!pack?.economySelector) return false;
+    try {
+      return Boolean(doc.querySelector(pack.economySelector));
+    } catch {
+      return false;
+    }
+  }
+
   function installAutomation({ config, pack, emit, doc = root.document, win = root }) {
     let timer = null;
     let throwsInWindow = 0;
@@ -105,14 +138,16 @@
           throwsInWindow = 0;
         }
         const limit = Math.max(1, config.maxPerMin ?? 20);
-        if (throwsInWindow >= limit) {
+        if (isEconomy(doc, pack)) {
+          report('economy-mode');
+        } else if (throwsInWindow >= limit) {
           report('rate-limited');
         } else if (isPaused(doc, pack)) {
           report('paused');
         } else {
           const target = findFirst(doc, pack.clickCandidates);
           if (target) {
-            target.click();
+            clickTarget(target, doc);
             throwsInWindow += 1;
             total += 1;
             report('clicking');
@@ -146,5 +181,5 @@
     };
   }
 
-  root.PokeAutomation = { installAutomation, findFirst, isPaused, isVisible, isClickable };
+  root.PokeAutomation = { installAutomation, findFirst, isPaused, isVisible, isClickable, clickTarget, isEconomy };
 })(globalThis);

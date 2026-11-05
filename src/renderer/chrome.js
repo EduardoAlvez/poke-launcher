@@ -200,8 +200,17 @@ window.launcher.onState((slots) => {
     auto.className = `auto${s.automation?.enabled ? ' on' : ''}`;
     auto.textContent = 'AUTO';
     auto.dataset.state = s.autoState ?? 'idle';
+    const autoStateLabel = {
+      clicking: 'lançando',
+      paused: 'pausado',
+      'waiting-button': 'sem alvo na cena',
+      'rate-limited': 'no limite por minuto',
+      'economy-mode': 'Modo Economia (o jogo farma sozinho)',
+      captured: 'parou: capturou',
+      error: 'erro',
+    };
     auto.title = s.automation?.enabled
-      ? `Automacao ativa (${s.automation.mode}) - estado: ${s.autoState ?? '?'} - ${s.autoThrows ?? 0} lancamentos`
+      ? `Automacao ativa (${s.automation.mode}) - ${autoStateLabel[s.autoState] ?? 'iniciando'} - ${s.autoThrows ?? 0} lancamentos`
       : 'Configurar automacao de lancamentos';
     auto.addEventListener('click', (e) => {
       e.stopPropagation();

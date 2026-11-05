@@ -322,7 +322,10 @@ ipcMain.handle('diagnostics:collect', async (event) => {
         clearTimeout(timer);
         resolve({ ok: true, report });
       });
-      wc.send('addon:recon', { selectors });
+      wc.send('addon:recon', {
+        selectors,
+        probes: ['.palco', '.palco.hunt-ativa', '.hud-hunt', '.campo-bola', '.caidos-bolas', '.caidos-bola', '.hunt-saida', '#cena'],
+      });
     });
   }
   const file = path.join(app.getPath('userData'), 'diagnostico.json');

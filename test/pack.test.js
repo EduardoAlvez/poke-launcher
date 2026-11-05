@@ -24,10 +24,12 @@ test('pack do jogo e valido e tem regras/ancoras', async () => {
   assert.ok(GAME_PATTERNS.includes('https://*.pokeidle.io/*'));
 });
 
-test('loadAutomationPack carrega candidatos e pausa', async () => {
+test('loadAutomationPack mira a lista de proximidade (arremesso manual)', async () => {
   const p = await loadAutomationPack();
-  assert.ok(p.clickCandidates.includes('.campo-bola'));
-  assert.ok(!p.clickCandidates.includes('.cb-quantos'), 'contador nao e botao de arremesso');
+  assert.ok(p.clickCandidates.some((s) => s.includes('.caido')));
+  assert.ok(!p.clickCandidates.includes('.campo-bola'), '.campo-bola e campo do formulario de login');
+  assert.ok(!p.clickCandidates.includes('#cena'), 'o palco nao tem handler de clique');
+  assert.equal(p.economySelector, 'html.modo-economia');
   assert.equal(p.stopOnRule, 'pokemon-caught');
 });
 
