@@ -1,4 +1,6 @@
-export function computeGrid(count, contentBounds, { cols, gap = 8, topOffset = 0 }) {
+export const TOOLBAR_H = 44;
+
+export function computeGrid(count, contentBounds, { cols, gap = 8, topOffset = TOOLBAR_H }) {
   if (count <= 0 || cols <= 0) return [];
   const { width: W, height: H } = contentBounds;
   const rows = Math.ceil(count / cols);
@@ -19,4 +21,13 @@ export function computeGrid(count, contentBounds, { cols, gap = 8, topOffset = 0
     });
   }
   return rects;
+}
+
+export function popupBounds(contentBounds, { gap = 8, topOffset = TOOLBAR_H } = {}) {
+  return {
+    x: gap,
+    y: topOffset + gap,
+    width: contentBounds.width - gap * 2,
+    height: contentBounds.height - topOffset - gap * 2,
+  };
 }

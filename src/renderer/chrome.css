@@ -44,6 +44,7 @@ button {
 button:hover { border-color: var(--accent); }
 #add { font-size: 16px; line-height: 1; }
 #add-form { display: flex; gap: 6px; align-items: center; }
+#add-form[hidden] { display: none; }
 #add-form input {
   background: #0e1015; color: var(--fg);
   border: 1px solid #2c3240; border-radius: 6px; padding: 5px 8px;

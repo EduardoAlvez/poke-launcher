@@ -15,6 +15,10 @@ function sendState() {
   );
 }
 
+function isChrome(sender) {
+  return !!win && !win.isDestroyed() && sender === win.webContents;
+}
+
 function createWindow() {
   win = new BrowserWindow({
     title: 'Poke Launcher',
@@ -24,7 +28,7 @@ function createWindow() {
     minHeight: 420,
     backgroundColor: '#14161b',
     webPreferences: {
-      preload: path.join(dirname, '../preload/chrome.js'),
+      preload: path.join(dirname, '../preload/chrome.cjs'),
       sandbox: true,
       contextIsolation: true,
       backgroundThrottling: false,
@@ -38,13 +42,15 @@ function createWindow() {
     win = null;
   });
 
-  registry.add('Conta 1');
-  registry.add('Conta 2');
+  registry.add('Conta 1').catch((err) => console.error('add Conta 1:', err.message));
+  registry.add('Conta 2').catch((err) => console.error('add Conta 2:', err.message));
   win.webContents.once('did-finish-load', sendState);
 }
 
-ipcMain.handle('launcher:add-slot', (_e, payload) => {
-  const { name, url } = payload ?? {};
+ipcMain.handle('launcher:add-slot', async (event, payload) => {
+  if (!isChrome(event.sender)) return;
+  const { url } = payload ?? {};
+  const name = String(payload?.name ?? '').slice(0, 24);
   let parsed;
   try {
     parsed = new URL(url || 'https://pokeidle.io/app');
@@ -52,17 +58,19 @@ ipcMain.handle('launcher:add-slot', (_e, payload) => {
     throw new Error('URL invalida');
   }
   if (!/^https?:$/.test(parsed.protocol)) throw new Error('Somente http(s)');
-  registry.add(name, parsed.href);
+  await registry.add(name, parsed.href);
   sendState();
   return registry.slots.length;
 });
 
-ipcMain.handle('launcher:remove-slot', (_e, payload) => {
+ipcMain.handle('launcher:remove-slot', (event, payload) => {
+  if (!isChrome(event.sender)) return;
   registry.remove(payload?.id);
   sendState();
 });
 
-ipcMain.handle('launcher:set-layout', (_e, payload) => {
+ipcMain.handle('launcher:set-layout', (event, payload) => {
+  if (!isChrome(event.sender)) return false;
   const cols = payload?.cols;
   if (!Number.isInteger(cols) || cols < 1 || cols > 4) return false;
   registry.cols = cols;
@@ -70,7 +78,8 @@ ipcMain.handle('launcher:set-layout', (_e, payload) => {
   return true;
 });
 
-ipcMain.on('launcher:focus-slot', (_e, payload) => {
+ipcMain.on('launcher:focus-slot', (event, payload) => {
+  if (!isChrome(event.sender)) return;
   const slot = registry.get(payload?.id);
   slot?.view.webContents.focus();
 });
@@ -79,6 +88,14 @@ app.whenReady().then(() => {
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+app.on('web-contents-created', (_e, contents) => {
+  contents.on('will-navigate', (event, url) => {
+    if (contents === win?.webContents && !url.startsWith('file:')) {
+      event.preventDefault();
+    }
   });
 });
 

@@ -1,7 +1,20 @@
 import { WebContentsView } from 'electron';
-import { computeGrid } from './layout.js';
+import { computeGrid, popupBounds, TOOLBAR_H } from './layout.js';
+import { installSlotExtensions } from './extensions.js';
 
 const DEFAULT_URL = 'https://pokeidle.io/app';
+const MAX_SLOTS = 8;
+
+function makeView(partitionId) {
+  return new WebContentsView({
+    webPreferences: {
+      partition: `persist:${partitionId}`,
+      sandbox: true,
+      contextIsolation: true,
+      backgroundThrottling: false,
+    },
+  });
+}
 
 export class SlotRegistry {
   constructor() {
@@ -15,19 +28,17 @@ export class SlotRegistry {
     this.win = win;
   }
 
-  add(name, url = DEFAULT_URL) {
+  async add(name, url = DEFAULT_URL) {
+    if (this.slots.length >= MAX_SLOTS) throw new Error(`Limite de ${MAX_SLOTS} sessoes`);
     const id = `slot-${++this.seq}`;
-    const view = new WebContentsView({
-      webPreferences: {
-        partition: `persist:${id}`,
-        sandbox: true,
-        contextIsolation: true,
-        backgroundThrottling: false,
-      },
-    });
-    const slot = { id, name: name || id, url, view };
+    const view = makeView(id);
+    const slot = { id, name: name || id, url, view, popups: [], crashes: [] };
     view.webContents.on('render-process-gone', () => this.recreate(slot));
+    this.bindOpenHandler(slot, view);
     this.slots.push(slot);
+    await installSlotExtensions(view.webContents.session, url).catch((err) =>
+      console.error(`[${id}] extensao indisponivel:`, err.message)
+    );
     if (this.win && !this.win.isDestroyed()) {
       this.win.contentView.addChildView(view);
       view.webContents.loadURL(url);
@@ -36,49 +47,84 @@ export class SlotRegistry {
     return slot;
   }
 
-  recreate(slot) {
-    const dead = slot.view;
-    if (this.win && !this.win.isDestroyed() && this.win.contentView.children.includes(dead)) {
-      this.win.contentView.removeChildView(dead);
-    }
-    dead.webContents.close();
-    const fresh = new WebContentsView({
-      webPreferences: {
-        partition: `persist:${slot.id}`,
-        sandbox: true,
-        contextIsolation: true,
-        backgroundThrottling: false,
-      },
+  bindOpenHandler(slot, view = slot.view) {
+    view.webContents.setWindowOpenHandler(({ url }) => {
+      let parsed;
+      try {
+        parsed = new URL(url);
+      } catch {
+        return { action: 'deny' };
+      }
+      if (!/^https?:$/.test(parsed.protocol)) return { action: 'deny' };
+      if (!this.win || this.win.isDestroyed()) return { action: 'deny' };
+      const popup = makeView(slot.id);
+      slot.popups.push(popup);
+      popup.webContents.on('render-process-gone', () => this.closePopup(slot, popup));
+      popup.webContents.once('destroyed', () => this.closePopup(slot, popup));
+      this.bindOpenHandler(slot, popup);
+      this.win.contentView.addChildView(popup);
+      popup.webContents.loadURL(parsed.href);
+      this.layout(this.win);
+      return { action: 'deny' };
     });
+  }
+
+  closePopup(slot, popup) {
+    const i = slot.popups.indexOf(popup);
+    if (i !== -1) slot.popups.splice(i, 1);
+    if (this.win && !this.win.isDestroyed() && this.win.contentView.children.includes(popup)) {
+      this.win.contentView.removeChildView(popup);
+    }
+    if (!popup.webContents.isDestroyed()) popup.webContents.close();
+    if (this.win && !this.win.isDestroyed()) this.layout(this.win);
+  }
+
+  recreate(slot) {
+    if (!this.slots.includes(slot)) return;
+    const now = Date.now();
+    slot.crashes = slot.crashes.filter((t) => now - t < 60_000);
+    slot.crashes.push(now);
+    if (slot.crashes.length >= 3) {
+      console.error(`[${slot.id}] 3 quedas em 60s — nova tentativa em 30s`);
+      setTimeout(() => this.recreateNow(slot), 30_000);
+    } else {
+      this.recreateNow(slot);
+    }
+  }
+
+  recreateNow(slot) {
+    if (!this.slots.includes(slot) || !this.win || this.win.isDestroyed()) return;
+    const dead = slot.view;
+    if (this.win.contentView.children.includes(dead)) this.win.contentView.removeChildView(dead);
+    if (!dead.webContents.isDestroyed()) dead.webContents.close();
+    const fresh = makeView(slot.id);
     slot.view = fresh;
     fresh.webContents.on('render-process-gone', () => this.recreate(slot));
+    this.bindOpenHandler(slot, fresh);
+    this.win.contentView.addChildView(fresh);
     fresh.webContents.loadURL(slot.url);
-    if (this.win && !this.win.isDestroyed()) {
-      this.win.contentView.addChildView(fresh);
-      this.layout(this.win);
-    }
-    return fresh;
+    this.layout(this.win);
   }
 
   remove(id) {
     const i = this.slots.findIndex((s) => s.id === id);
     if (i === -1) return false;
     const [slot] = this.slots.splice(i, 1);
+    for (const popup of [...slot.popups]) this.closePopup(slot, popup);
     if (this.win && !this.win.isDestroyed() && this.win.contentView.children.includes(slot.view)) {
       this.win.contentView.removeChildView(slot.view);
     }
-    slot.view.webContents.close();
+    if (!slot.view.webContents.isDestroyed()) slot.view.webContents.close();
     if (this.win && !this.win.isDestroyed()) this.layout(this.win);
     return true;
   }
 
   destroyAll() {
-    for (const slot of this.slots) slot.view.webContents.close();
+    for (const slot of this.slots) {
+      for (const popup of [...slot.popups]) this.closePopup(slot, popup);
+      if (!slot.view.webContents.isDestroyed()) slot.view.webContents.close();
+    }
     this.slots = [];
-  }
-
-  get(id) {
-    return this.slots.find((s) => s.id === id);
   }
 
   layout(win) {
@@ -86,12 +132,20 @@ export class SlotRegistry {
     const [cw, ch] = win.getContentSize();
     const rects = computeGrid(this.slots.length, { width: cw, height: ch }, {
       cols: this.cols,
-      topOffset: win.chromeHeight ?? 44,
+      topOffset: TOOLBAR_H,
     });
-    this.slots.forEach((slot, i) => {
-      const parent = win.contentView.children.includes(slot.view);
-      if (!parent) win.contentView.addChildView(slot.view);
-      slot.view.setBounds(rects[i]);
-    });
+    if (rects.length === this.slots.length) {
+      this.slots.forEach((slot, i) => {
+        if (!win.contentView.children.includes(slot.view)) win.contentView.addChildView(slot.view);
+        slot.view.setBounds(rects[i]);
+      });
+    }
+    const pRect = popupBounds({ width: cw, height: ch });
+    for (const slot of this.slots) {
+      for (const popup of slot.popups) {
+        if (!win.contentView.children.includes(popup)) win.contentView.addChildView(popup);
+        popup.setBounds(pRect);
+      }
+    }
   }
 }
