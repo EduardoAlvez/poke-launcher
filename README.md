@@ -6,6 +6,16 @@ notificações nativas.
 
 Não é afiliado ao PokeIdle nem aos criadores do jogo.
 
+## Instalação
+
+Baixe o instalador na página de releases:
+[github.com/EduardoAlvez/poke-launcher/releases](https://github.com/EduardoAlvez/poke-launcher/releases)
+
+- Windows: `Poke Launcher Setup <versão>.exe` (NSIS, instalador para o usuário final).
+- O instalador **não é assinado** (sem certificado de código): o Windows pode mostrar o aviso do
+  SmartScreen. Clique em "Mais informações" → "Executar assim mesmo".
+- Linux: pacote `.deb` (gerado com `npm run dist`).
+
 ## Recursos
 
 - **Sessões isoladas**: até 8 contas lado a lado, cada uma com cookies/armazenamento próprios

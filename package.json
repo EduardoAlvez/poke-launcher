@@ -36,7 +36,15 @@
         "deb"
       ],
       "category": "Game"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "EduardoAlvez",
+        "repo": "poke-launcher",
+        "releaseType": "release"
+      }
+    ]
   },
   "dependencies": {
     "extract-zip": "^2.0.1"
