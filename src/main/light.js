@@ -54,8 +54,10 @@ export const LIGHT_RESTORE = `(() => {
   const KEY = '__pokeLauncherLight';
   const state = window[KEY];
   if (!state) return 'absent';
-  window.requestAnimationFrame = state.real;
-  window.cancelAnimationFrame = state.realCaf;
+  // Só desfaz o que ainda é nosso: se a página instalou um rAF depois, esse
+  // passa por cima do limitador — e o limitador já não está no caminho.
+  if (window.requestAnimationFrame === state.wrapped) window.requestAnimationFrame = state.real;
+  if (window.cancelAnimationFrame === state.wrappedCaf) window.cancelAnimationFrame = state.realCaf;
   delete window[KEY];
   return 'restored';
 })()`;
@@ -64,11 +66,11 @@ export const LIGHT_RESTORE = `(() => {
 export const LIGHT_REAPPLY = `(() => {
   const KEY = '__pokeLauncherLight';
   const state = window[KEY];
-  if (state) {
-    window.requestAnimationFrame = state.real;
-    window.cancelAnimationFrame = state.realCaf;
-    delete window[KEY];
-  }
+  if (!state) return 'absent';
+  // Não restaura o rAF antigo: o APPLY seguinte embrulha o rAF que a página
+  // está usando agora, e o limitador volta por cima dele.
+  if (window.cancelAnimationFrame === state.wrappedCaf) window.cancelAnimationFrame = state.realCaf;
+  delete window[KEY];
   return 'reset';
 })()`;
 
@@ -85,18 +87,37 @@ export const LIGHT_VERIFY = `(() => {
 export const LIGHT_WATCH = `(() => {
   const doc = window.document;
   const root = doc?.documentElement;
+  const visivel = (el) => {
+    if (!el || el.disabled) return false;
+    const rect = el.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+    const style = window.getComputedStyle(el);
+    return style.display !== 'none' && style.visibility !== 'hidden';
+  };
   const eco = !!root?.classList.contains('modo-economia');
   const ultra = !!root?.classList.contains('modo-ultra');
   if (eco) {
     const btn = doc.querySelector('#eco-sair');
-    if (btn) {
+    if (visivel(btn)) {
+      try {
+        window.localStorage.setItem('${LIGHT_ECONOMY_KEY}', '0');
+        window.localStorage.setItem('${LIGHT_ULTRA_KEY}', '0');
+      } catch {
+        /* sem preferencia: o clique basta */
+      }
       btn.click();
       return 'exit-economy';
     }
   }
   if (ultra) {
     const btn = doc.querySelector('#ultra-sair');
-    if (btn) {
+    if (visivel(btn)) {
+      try {
+        window.localStorage.setItem('${LIGHT_ECONOMY_KEY}', '0');
+        window.localStorage.setItem('${LIGHT_ULTRA_KEY}', '0');
+      } catch {
+        /* sem preferencia: o clique basta */
+      }
       btn.click();
       return 'exit-ultra';
     }
@@ -120,4 +141,42 @@ export const LIGHT_PREFS_OFF = `(() => {
   } catch {
     return false;
   }
+})()`;
+
+/**
+ * A cena está desenhando? Amostra o canvas da cena várias vezes (mundo
+ * principal, para não criar o contexto 2D do jogo no mundo isolado): se a
+ * assinatura muda, os pixels mudaram. Um laço de desenho parado deixa as
+ * assinaturas iguais.
+ */
+export const LIGHT_SAMPLE_SCENE = `(async () => {
+  const canvas = document.querySelector('#cena');
+  if (!canvas || !canvas.width || !canvas.height) return { changed: null, reads: 0, distinct: 0 };
+  let ctx = null;
+  try {
+    ctx = canvas.getContext('2d');
+  } catch {
+    return { changed: null, reads: 0, distinct: 0 };
+  }
+  if (!ctx) return { changed: null, reads: 0, distinct: 0 };
+  const w = Math.max(1, Math.min(64, Math.floor(canvas.width / 2)));
+  const h = Math.max(1, Math.min(64, Math.floor(canvas.height / 2)));
+  const x = Math.max(0, Math.floor((canvas.width - w) / 2));
+  const y = Math.max(0, Math.floor((canvas.height - h) / 2));
+  const sigs = new Set();
+  let reads = 0;
+  const deadline = Date.now() + 1200;
+  do {
+    let acc = 0;
+    try {
+      const data = ctx.getImageData(x, y, w, h).data;
+      for (let i = 0; i < data.length; i += 1) acc = (acc * 31 + data[i]) >>> 0;
+    } catch (err) {
+      return { changed: null, reads, distinct: sigs.size, error: String(err?.message ?? err) };
+    }
+    sigs.add(String(acc));
+    reads += 1;
+    if (Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 200));
+  } while (Date.now() < deadline);
+  return { changed: sigs.size > 1, reads, distinct: sigs.size, size: canvas.width + 'x' + canvas.height };
 })()`;

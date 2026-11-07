@@ -53,7 +53,12 @@ faz o oposto: mantém o campo chegando e corta o custo por fora.
 - esconde a `#cena` e pausa animações por CSS, e limita o `requestAnimationFrame` a ~3 quadros/s
   (o laço da cena se reagenda por ele); a lista de caídos é montada por timer a partir do servidor;
 - ao desligar, devolve o rAF original e remove o CSS, sem recarregar. O jogo continua fora do
-  Economia/Ultra até você religar no menu dele.
+  Economia/Ultra até você religar no menu dele;
+- a cada 20 s o launcher vigia a sessão: se o jogo voltar para Economia/Ultra pelo menu dele,
+  o launcher sai pela cena (é o próprio jogo que avisa o servidor) para o campo continuar chegando.
+  Com o modo leve ligado, o jogo fica fora do Economia/Ultra — inclusive quando a automação para;
+- o limitador envolve o `requestAnimationFrame` global da página: se o jogo instalar o dele
+  depois, o limitador é reaplicado por cima (ou o jogo passa a comando, se ele assumir o controle).
 
 O custo esperado fica próximo do Modo Economia do jogo, mas com o `campo` ainda chegando — é isso
 que permite lançar bola numa máquina fraca.

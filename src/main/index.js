@@ -7,11 +7,13 @@ import { SlotStore, sweepOrphanPartitions, defaultState, buildSnapshot } from '.
 import { Notifier, parseGameEvent } from './notifications.js';
 import { createTray } from './tray.js';
 import { loadPack, buildAddonPreload, applyPackCss, sendPackRules, loadAutomationPack, auditPack, collectSelectors } from './addons.js';
+import { LIGHT_SAMPLE_SCENE } from './light.js';
 import { AutomationController, RISK_TEXT } from './automation.js';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const registry = new SlotRegistry();
 registry.onPopupChange = () => sendState();
+registry.onLightChange = () => sendState();
 let win = null;
 let store = null;
 let persisted = defaultState();
@@ -85,6 +87,7 @@ function pushState() {
       loggedIn: s.loggedIn === true,
       lightMode: s.lightMode === true,
       lightApplied: s.lightApplied === true,
+      lightFailed: s.lightFailed === true,
       automation: {
         enabled: s.automation?.enabled === true,
         exitEconomy: s.automation?.exitEconomy !== false,
@@ -320,7 +323,7 @@ ipcMain.handle('diagnostics:collect', async (event) => {
   for (const slot of registry.slots) {
     const wc = slot.view.webContents;
     if (wc.isDestroyed()) continue;
-    slots[slot.id] = await new Promise((resolve) => {
+    const recon = new Promise((resolve) => {
       const timer = setTimeout(() => {
         reconWaiters.delete(wc.id);
         resolve({ ok: false, error: 'timeout' });
@@ -334,6 +337,13 @@ ipcMain.handle('diagnostics:collect', async (event) => {
         probes: ['.palco', '.palco.hunt-ativa', '.hud-hunt', '.campo-bola', '.caidos-bolas', '.caidos-bola', '.hunt-saida', '#cena'],
       });
     });
+    // A amostra da cena roda no mundo principal (o do jogo): no mundo isolado
+    // ela criaria o contexto 2D do canvas com atributos padrao.
+    const scene = wc
+      .executeJavaScript(LIGHT_SAMPLE_SCENE, true)
+      .catch((err) => ({ changed: null, error: String(err?.message ?? err) }));
+    const [result, sceneReport] = await Promise.all([recon, scene]);
+    slots[slot.id] = { ...result, scene: sceneReport };
   }
   const file = path.join(app.getPath('userData'), 'diagnostico.json');
   await fs.writeFile(file, JSON.stringify({ at: new Date().toISOString(), selectors, slots }, null, 2), 'utf8');

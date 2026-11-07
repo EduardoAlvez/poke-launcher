@@ -5,6 +5,7 @@ import {
   LIGHT_CSS,
   LIGHT_ECONOMY_KEY,
   LIGHT_PREFS_OFF,
+  LIGHT_REAPPLY,
   LIGHT_PREFS_ON,
   LIGHT_RESTORE,
   LIGHT_THROTTLE_MS,
@@ -79,29 +80,67 @@ test('restaurar nao descarta o quadro pendente: o laco do jogo continua', () => 
   assert.equal(chamadas, 1, 'o callback pendente ainda roda (a cena nao congela)');
 });
 
-test('a vigia sai do Modo Economia/Ultra quando o jogo volta para eles', () => {
-  let eco = true;
-  let ultra = false;
-  let ecoClicks = 0;
-  let ultraClicks = 0;
+function fakeWatchWindow({ eco = false, ultra = false, visible = true } = {}) {
+  const state = { eco, ultra, ecoClicks: 0, ultraClicks: 0 };
+  const botao = (contador) => ({
+    disabled: false,
+    getBoundingClientRect: () => ({ width: visible ? 80 : 0, height: visible ? 20 : 0 }),
+    click: () => {
+      contador();
+    },
+  });
   const win = {
+    localStorage: { setItem: () => {} },
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible' }),
     document: {
-      documentElement: { classList: { contains: (c) => (c === 'modo-economia' ? eco : ultra) } },
+      documentElement: { classList: { contains: (c) => (c === 'modo-economia' ? state.eco : state.ultra) } },
       querySelector: (sel) => {
-        if (sel === '#eco-sair' && eco) return { click: () => { ecoClicks += 1; eco = false; } };
-        if (sel === '#ultra-sair' && ultra) return { click: () => { ultraClicks += 1; ultra = false; } };
+        if (sel === '#eco-sair' && state.eco) return botao(() => { state.ecoClicks += 1; state.eco = false; });
+        if (sel === '#ultra-sair' && state.ultra) return botao(() => { state.ultraClicks += 1; state.ultra = false; });
         return null;
       },
     },
   };
+  return { win, state };
+}
+
+test('a vigia sai do Modo Economia/Ultra quando o jogo volta para eles', () => {
+  const { win, state } = fakeWatchWindow({ eco: true });
   assert.equal(run(LIGHT_WATCH, win), 'exit-economy');
-  assert.equal(ecoClicks, 1);
+  assert.equal(state.ecoClicks, 1);
   assert.equal(run(LIGHT_WATCH, win), 'ok');
-  eco = false;
-  ultra = true;
-  assert.equal(run(LIGHT_WATCH, win), 'exit-ultra');
-  assert.equal(ultraClicks, 1);
-  assert.equal(run(LIGHT_WATCH, win), 'ok');
+
+  const ultraCase = fakeWatchWindow({ ultra: true });
+  assert.equal(run(LIGHT_WATCH, ultraCase.win), 'exit-ultra');
+  assert.equal(ultraCase.state.ultraClicks, 1);
+  assert.equal(run(LIGHT_WATCH, ultraCase.win), 'ok');
+});
+
+test('a vigia nao clica em botao escondido', () => {
+  const { win, state } = fakeWatchWindow({ eco: true, visible: false });
+  assert.equal(run(LIGHT_WATCH, win), 'still-economy');
+  assert.equal(state.ecoClicks, 0);
+});
+
+test('reaplicar nao atropela o rAF que a pagina instalou depois', () => {
+  const { win } = fakeWindow();
+  run(LIGHT_APPLY, win);
+  const pagina = (cb) => cb(99);
+  win.requestAnimationFrame = pagina;
+  assert.equal(run(LIGHT_REAPPLY, win), 'reset');
+  assert.equal(win.requestAnimationFrame, pagina, 'o rAF da pagina continua no lugar');
+  run(LIGHT_APPLY, win);
+  assert.notEqual(win.requestAnimationFrame, pagina, 'o limitador volta por cima do rAF da pagina');
+  assert.equal(run(LIGHT_VERIFY, win), true);
+});
+
+test('restaurar nao sobrescreve um rAF novo da pagina', () => {
+  const { win } = fakeWindow();
+  run(LIGHT_APPLY, win);
+  const pagina = (cb) => cb(99);
+  win.requestAnimationFrame = pagina;
+  assert.equal(run(LIGHT_RESTORE, win), 'restored');
+  assert.equal(win.requestAnimationFrame, pagina, 'a pagina continua com o rAF dela');
 });
 
 test('o rAF limitado agenda por timeout e entrega o relogio de performance', () => {

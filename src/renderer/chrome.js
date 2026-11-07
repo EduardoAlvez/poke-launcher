@@ -248,9 +248,10 @@ function updateChip(view, s) {
   view.dot.title = s.loggedIn ? 'Sessao com login ativo' : 'Sem login';
   view.label.textContent = s.name;
   const light = s.lightMode === true;
-  view.light.className = `light${light ? ' on' : ''}${view.lightError ? ' error' : ''}`;
-  view.light.title = view.lightError
-    ? 'Modo leve nao aplicado nesta sessao: o jogo recusou a preferencia. Clique para tentar de novo.'
+  const failed = view.lightError || s.lightFailed === true;
+  view.light.className = `light${light ? ' on' : ''}${failed ? ' error' : ''}`;
+  view.light.title = failed
+    ? 'Modo leve nao aplicado nesta sessao (o jogo recusou a preferencia ou o rAF nao pode ser limitado). Clique para tentar de novo.'
     : light
       ? 'Modo leve ligado: cena oculta e CPU poupado; os lancamentos seguem'
       : 'Modo leve desligado: clique para ocultar a cena e poupar CPU sem parar os lancamentos';
