@@ -21,6 +21,8 @@ Não é afiliado ao PokeIdle nem aos criadores do jogo.
   - extensão `/hunt for PokeIdle` baixada da Chrome Web Store e carregada por sessão;
   - regras de notificação com âncoras por classe CSS.
 - **Automação de lançamentos (opt-in)** — veja o aviso abaixo.
+- **Modo leve por sessão** (`LEVE` no chip) — cena oculta e rAF limitado, sem parar a caça
+  nem os lançamentos; pensado para notebook fraco.
 
 ## Automação: leia antes de usar
 
@@ -39,6 +41,22 @@ Garantias de projeto (não de resultado):
 - sai do **Modo Economia** enquanto ativa (opção no modal): sem a cena o servidor não manda o campo
   e não existe alvo para lançar; ao parar, volta ao modo economia;
 - o kill switch interrompe em menos de 500 ms.
+
+### Modo leve (notebook fraco)
+
+O Modo Economia/Ultra do jogo economiza CPU, mas **para a cena e avisa o servidor para não mandar
+mais o campo** — sem campo não existe lista de captura e o AUTO não tem onde clicar. O modo leve
+faz o oposto: mantém o campo chegando e corta o custo por fora.
+
+- liga/desliga por sessão no botão **LEVE** do chip (fica azul quando ativo);
+- zera `cfg-economia` e `cfg-ultra` do jogo e recarrega a sessão ao ligar (o jogo relê a escolha);
+- esconde a `#cena` e pausa animações por CSS, e limita o `requestAnimationFrame` a ~3 quadros/s
+  (o laço da cena se reagenda por ele); a lista de caídos é montada por timer a partir do servidor;
+- ao desligar, devolve o rAF original e remove o CSS, sem recarregar. O jogo continua fora do
+  Economia/Ultra até você religar no menu dele.
+
+O custo esperado fica próximo do Modo Economia do jogo, mas com o `campo` ainda chegando — é isso
+que permite lançar bola numa máquina fraca.
 
 Dois modos: **intervalo fixo** e **até capturar** (para após detectar uma captura). A parada por
 captura é registrada no processo principal: o `AUTO` fica vermelho, a sessão é desligada e é preciso
