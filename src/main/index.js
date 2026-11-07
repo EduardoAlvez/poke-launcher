@@ -83,6 +83,8 @@ function pushState() {
       name: s.name,
       url: s.url,
       loggedIn: s.loggedIn === true,
+      lightMode: s.lightMode === true,
+      lightApplied: s.lightApplied === true,
       automation: {
         enabled: s.automation?.enabled === true,
         exitEconomy: s.automation?.exitEconomy !== false,
@@ -226,6 +228,7 @@ async function restoreSlots() {
       if (created) {
         created.muted = slot.muted;
         created.zoomFactor = slot.zoomFactor;
+        created.lightMode = slot.lightMode === true;
         if (slot.automation) {
           created.automation = { ...slot.automation, enabled: false };
         }
@@ -342,6 +345,18 @@ ipcMain.handle('launcher:close-popups', (event) => {
   const count = registry.closeAllPopups();
   sendState();
   return count;
+});
+
+ipcMain.handle('launcher:set-light', async (event, payload) => {
+  if (!isChrome(event.sender)) return { ok: false, error: 'origem invalida' };
+  const slot = registry.get(payload?.id);
+  if (!slot) return { ok: false, error: 'sessao inexistente' };
+  const on = payload?.on === true;
+  if (on) await registry.enableLight(slot);
+  else await registry.disableLight(slot);
+  await persist();
+  sendState();
+  return { ok: true, lightMode: slot.lightMode === true };
 });
 
 ipcMain.handle('automation:set', async (event, payload) => {

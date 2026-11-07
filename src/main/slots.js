@@ -2,6 +2,7 @@ import { WebContentsView } from 'electron';
 import { computeGrid, popupBounds, TOOLBAR_H } from './layout.js';
 import { installSlotExtensions } from './extensions.js';
 import { registerAddonPreload } from './addons.js';
+import { LIGHT_APPLY, LIGHT_CSS, LIGHT_PREFS_OFF, LIGHT_PREFS_ON, LIGHT_RESTORE } from './light.js';
 
 const DEFAULT_URL = 'https://pokeidle.io/app';
 const MAX_SLOTS = 8;
@@ -44,8 +45,19 @@ export class SlotRegistry {
       if (Number.isFinite(n) && n > this.seq) this.seq = n;
     }
     const view = makeView(slotId);
-    const slot = { id: slotId, name: name || slotId, url, view, popups: [], crashes: [] };
+    const slot = {
+      id: slotId,
+      name: name || slotId,
+      url,
+      view,
+      popups: [],
+      crashes: [],
+      lightMode: false,
+      lightApplied: false,
+      lightCssKey: null,
+    };
     view.webContents.on('render-process-gone', () => this.recreate(slot));
+    view.webContents.on('did-finish-load', () => this.syncLight(slot));
     this.bindOpenHandler(slot, view);
     this.slots.push(slot);
     if (this.addonPreloadPath) {
@@ -109,6 +121,76 @@ export class SlotRegistry {
     this.onPopupChange?.(slot);
   }
 
+  /**
+   * Liga o modo leve nesta sessão: tira o jogo de Economia/Ultra (senão o
+   * servidor para de mandar `campo`) e recarrega para ele relembrar a escolha.
+   * O CSS + o limite de rAF entram no próximo `did-finish-load`.
+   */
+  async enableLight(slot) {
+    slot.lightMode = true;
+    const wc = slot.view.webContents;
+    if (wc.isDestroyed()) return false;
+    if (/^https?:/i.test(wc.getURL())) {
+      await wc.executeJavaScript(LIGHT_PREFS_OFF, true).catch(() => {});
+      wc.reload();
+      return true;
+    }
+    return false;
+  }
+
+  /** Desliga sem recarregar: devolve o rAF original e remove o CSS injetado. */
+  async disableLight(slot) {
+    slot.lightMode = false;
+    slot.lightApplied = false;
+    const wc = slot.view.webContents;
+    if (wc.isDestroyed()) return;
+    if (slot.lightCssKey) {
+      await wc.removeInsertedCSS(slot.lightCssKey).catch(() => {});
+      slot.lightCssKey = null;
+    }
+    await wc.executeJavaScript(LIGHT_RESTORE, true).catch(() => {});
+  }
+
+  /**
+   * Reaplica num carregamento novo. Se o jogo voltou para Economia/Ultra (a
+   * preferência vive no localStorage), zera e recarrega uma vez — o que também
+   * descarta a cena antiga.
+   */
+  async syncLight(slot) {
+    if (!slot.lightMode) return;
+    const wc = slot.view.webContents;
+    if (wc.isDestroyed() || !/^https?:/i.test(wc.getURL())) return;
+    const dirty = await wc.executeJavaScript(LIGHT_PREFS_ON, true).catch(() => false);
+    if (dirty) {
+      await wc.executeJavaScript(LIGHT_PREFS_OFF, true).catch(() => {});
+      wc.reload();
+      return;
+    }
+    await this.applyLight(slot);
+  }
+
+  async applyLight(slot) {
+    const wc = slot.view.webContents;
+    if (wc.isDestroyed()) return false;
+    if (slot.lightCssKey) {
+      await wc.removeInsertedCSS(slot.lightCssKey).catch(() => {});
+      slot.lightCssKey = null;
+    }
+    try {
+      slot.lightCssKey = await wc.insertCSS(LIGHT_CSS, { cssOrigin: 'user' });
+    } catch (err) {
+      console.error(`[${slot.id}] modo leve css:`, err.message);
+    }
+    try {
+      await wc.executeJavaScript(LIGHT_APPLY, true);
+      slot.lightApplied = true;
+    } catch (err) {
+      console.error(`[${slot.id}] modo leve rAF:`, err.message);
+      slot.lightApplied = false;
+    }
+    return slot.lightApplied;
+  }
+
   setViewsVisible(visible) {
     for (const slot of this.slots) {
       slot.view.setVisible(visible);
@@ -152,7 +234,10 @@ export class SlotRegistry {
     if (!dead.webContents.isDestroyed()) dead.webContents.close();
     const fresh = makeView(slot.id);
     slot.view = fresh;
+    slot.lightApplied = false;
+    slot.lightCssKey = null;
     fresh.webContents.on('render-process-gone', () => this.recreate(slot));
+    fresh.webContents.on('did-finish-load', () => this.syncLight(slot));
     this.bindOpenHandler(slot, fresh);
     this.win.contentView.addChildView(fresh);
     fresh.webContents.loadURL(slot.url);
