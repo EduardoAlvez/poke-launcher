@@ -36,6 +36,8 @@ Garantias de projeto (não de resultado):
 - nunca liga sozinha; sem consentimento, o botão não ativa;
 - tem indicador visível por sessão (`AUTO` aceso, vermelho quando parou) e **Parar automações** na toolbar e na bandeja;
 - o laço roda no mundo isolado da página, com pausa por seletor/texto e limite por minuto;
+- sai do **Modo Economia** enquanto ativa (opção no modal): sem a cena o servidor não manda o campo
+  e não existe alvo para lançar; ao parar, volta ao modo economia;
 - o kill switch interrompe em menos de 500 ms.
 
 Dois modos: **intervalo fixo** e **até capturar** (para após detectar uma captura). A parada por

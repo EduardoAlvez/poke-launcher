@@ -126,6 +126,7 @@
     let ticks = 0;
     let lastTickAt = null;
     let stopped = false;
+    let economyExited = false;
     let lastState = null;
 
     const random = () => (win.crypto?.getRandomValues ? win.crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32 : Math.random());
@@ -167,7 +168,16 @@
         }
         const limit = Math.max(1, config.maxPerMin ?? 20);
         if (isEconomy(doc, pack)) {
-          report('economy-mode');
+          const exit = config.exitEconomy !== false && pack?.economyExitSelector
+            ? findFirst(doc, [pack.economyExitSelector])
+            : null;
+          if (exit) {
+            clickTarget(exit, doc);
+            economyExited = true;
+            report('exiting-economy');
+          } else {
+            report('economy-mode');
+          }
         } else if (isAccountTaken(doc, pack)) {
           report('session-taken');
         } else if (throwsInWindow >= limit) {
@@ -185,9 +195,8 @@
             report('waiting-button');
           }
         }
-      } catch (err) {
+      } catch {
         report('error');
-        emit?.({ type: 'automation-status', state: 'error', message: String(err?.message ?? err).slice(0, 120), running: !stopped });
       } finally {
         if (!stopped) schedule();
       }
@@ -200,6 +209,11 @@
       timer = null;
       if (heartbeat && typeof win.clearInterval === 'function') win.clearInterval(heartbeat);
       heartbeat = null;
+      if (economyExited && reason !== 'reconfigurado' && pack?.economyEnterSelector) {
+        const enter = findFirst(doc, [pack.economyEnterSelector]);
+        if (enter) clickTarget(enter, doc);
+      }
+      economyExited = false;
       report(reason);
     };
 

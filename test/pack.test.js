@@ -32,6 +32,8 @@ test('loadAutomationPack mira a lista de proximidade (arremesso manual)', async 
   assert.equal(p.economySelector, 'html.modo-economia');
   assert.equal(p.countSelector, '#caidos-lista .caido');
   assert.equal(p.accountTakenSelector, '#sessao-tomada:not(.hidden)');
+  assert.equal(p.economyExitSelector, '#eco-sair');
+  assert.equal(p.economyEnterSelector, '.hunt-eco');
   assert.equal(p.stopOnRule, 'pokemon-caught');
 });
 

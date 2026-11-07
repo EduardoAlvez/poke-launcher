@@ -8,6 +8,7 @@ const modal = document.getElementById('modal');
 const modalSlot = document.getElementById('modal-slot');
 const modalRisk = document.getElementById('modal-risk');
 const modalConsent = document.getElementById('modal-consent');
+const modalExitEco = document.getElementById('modal-exit-eco');
 const modalMode = document.getElementById('modal-mode');
 const modalInterval = document.getElementById('modal-interval');
 const modalJitter = document.getElementById('modal-jitter');
@@ -67,6 +68,7 @@ modalSave.addEventListener('click', async () => {
   const config = {
     enabled: true,
     consent: true,
+    exitEconomy: modalExitEco.checked,
     mode: modalMode.value,
     intervalMs: Number(modalInterval.value),
     jitterMs: Number(modalJitter.value),
@@ -116,6 +118,7 @@ function openModal(slot) {
   editingSlot = slot;
   modalSlot.textContent = `Sessão: ${slot.name}`;
   modalConsent.checked = slot.automation?.enabled === true;
+  modalExitEco.checked = slot.automation?.exitEconomy !== false;
   modalMode.value = slot.automation?.mode ?? 'fixed';
   modalInterval.value = slot.automation?.intervalMs ?? 2000;
   modalJitter.value = slot.automation?.jitterMs ?? 800;
@@ -177,6 +180,7 @@ const autoStateLabel = {
   'waiting-button': 'sem alvo na cena',
   'rate-limited': 'no limite por minuto',
   'economy-mode': 'Modo Economia (o jogo farma sozinho)',
+  'exiting-economy': 'saindo do Modo Economia',
   'session-taken': 'sessão tomada em outra aba/dispositivo',
   captured: 'parou: capturou',
   error: 'erro',

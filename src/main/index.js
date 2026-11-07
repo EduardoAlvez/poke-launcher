@@ -85,6 +85,7 @@ function pushState() {
       loggedIn: s.loggedIn === true,
       automation: {
         enabled: s.automation?.enabled === true,
+        exitEconomy: s.automation?.exitEconomy !== false,
         mode: s.automation?.mode ?? 'fixed',
         intervalMs: s.automation?.intervalMs ?? 2000,
         jitterMs: s.automation?.jitterMs ?? 800,

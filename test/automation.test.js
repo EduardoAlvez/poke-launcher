@@ -26,6 +26,8 @@ test('sanitizeAutomation normaliza e exige consentimento para enabled', () => {
   const ok = sanitizeAutomation({ enabled: true, consent: true, mode: 'until-catch' });
   assert.equal(ok.enabled, true);
   assert.equal(ok.mode, 'until-catch');
+  assert.equal(ok.exitEconomy, true, 'sai do Modo Economia por padrao');
+  assert.equal(sanitizeAutomation({ exitEconomy: false }).exitEconomy, false);
 });
 
 test('canEnable exige consentimento explicito', () => {
@@ -296,4 +298,83 @@ test('isAccountTaken detecta o aviso de sessao tomada', () => {
   assert.equal(isAccountTaken({ querySelector: (s) => (s === sel ? {} : null) }, { accountTakenSelector: sel }), true);
   assert.equal(isAccountTaken({ querySelector: () => null }, { accountTakenSelector: sel }), false);
   assert.equal(isAccountTaken({ querySelector: () => ({}) }, {}), false);
+});
+
+
+test('sai do Modo Economia para lancar e volta ao parar', () => {
+  let eco = true;
+  let exits = 0;
+  let enters = 0;
+  const doc = {
+    body: { textContent: '' },
+    defaultView: null,
+    querySelector: (sel) => {
+      if (sel === 'html.modo-economia') return eco ? {} : null;
+      if (sel === '#eco-sair') return eco ? { textContent: '', hidden: false, click: () => { eco = false; exits += 1; } } : null;
+      if (sel === '.hunt-eco') return eco ? null : { textContent: '', hidden: false, click: () => { enters += 1; } };
+      return null;
+    },
+  };
+  const events = [];
+  let tickFn = null;
+  const win = {
+    crypto: { getRandomValues: (arr) => { arr[0] = 1; return arr; } },
+    setTimeout: (fn) => { tickFn = fn; return 1; },
+    clearTimeout: () => {},
+    setInterval: () => 2,
+    clearInterval: () => {},
+  };
+  const handle = installAutomation({
+    config: { enabled: true, exitEconomy: true, intervalMs: 500, jitterMs: 0, maxPerMin: 60 },
+    pack: {
+      clickCandidates: ['#caidos-lista .caido'],
+      economySelector: 'html.modo-economia',
+      economyExitSelector: '#eco-sair',
+      economyEnterSelector: '.hunt-eco',
+      pauseSelectors: [],
+      pauseText: [],
+    },
+    emit: (e) => events.push(e),
+    doc,
+    win,
+  });
+  tickFn();
+  assert.equal(exits, 1);
+  assert.equal(eco, false);
+  assert.equal(events.at(-1).state, 'exiting-economy');
+  handle.stop('captured');
+  assert.equal(enters, 1, 'volta ao Modo Economia ao parar');
+});
+
+test('exitEconomy=false nao mexe no Modo Economia', () => {
+  let exits = 0;
+  const doc = {
+    body: { textContent: '' },
+    defaultView: null,
+    querySelector: (sel) => {
+      if (sel === 'html.modo-economia') return {};
+      if (sel === '#eco-sair') return { textContent: '', hidden: false, click: () => { exits += 1; } };
+      return null;
+    },
+  };
+  let tickFn = null;
+  const win = {
+    crypto: { getRandomValues: (arr) => { arr[0] = 1; return arr; } },
+    setTimeout: (fn) => { tickFn = fn; return 1; },
+    clearTimeout: () => {},
+    setInterval: () => 2,
+    clearInterval: () => {},
+  };
+  const events = [];
+  const handle = installAutomation({
+    config: { enabled: true, exitEconomy: false, intervalMs: 500, jitterMs: 0, maxPerMin: 60 },
+    pack: { clickCandidates: ['.x'], economySelector: 'html.modo-economia', economyExitSelector: '#eco-sair', pauseSelectors: [], pauseText: [] },
+    emit: (e) => events.push(e),
+    doc,
+    win,
+  });
+  tickFn();
+  assert.equal(exits, 0);
+  assert.equal(events.at(-1).state, 'economy-mode');
+  handle.stop();
 });

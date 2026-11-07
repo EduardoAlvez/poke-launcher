@@ -48,7 +48,7 @@ export function parseSlot(raw) {
 }
 
 export function parseAutomation(raw) {
-  const base = { enabled: false, consent: false, mode: 'fixed', intervalMs: 2000, jitterMs: 800, maxPerMin: 20 };
+  const base = { enabled: false, consent: false, exitEconomy: true, mode: 'fixed', intervalMs: 2000, jitterMs: 800, maxPerMin: 20 };
   if (!raw || typeof raw !== 'object') return base;
   const mode = raw.mode === 'until-catch' ? 'until-catch' : 'fixed';
   const num = (v, fallback, min, max) =>
@@ -56,6 +56,7 @@ export function parseAutomation(raw) {
   return {
     enabled: raw.enabled === true && raw.consent === true,
     consent: raw.consent === true,
+    exitEconomy: raw.exitEconomy !== false,
     mode,
     intervalMs: num(raw.intervalMs, base.intervalMs, 500, 60000),
     jitterMs: num(raw.jitterMs, base.jitterMs, 0, 5000),
