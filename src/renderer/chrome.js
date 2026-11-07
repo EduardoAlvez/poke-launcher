@@ -205,20 +205,29 @@ function createChip() {
   chip.appendChild(dot);
   const label = document.createElement('span');
   chip.appendChild(label);
+  const light = document.createElement('button');
+  light.type = 'button';
+  light.textContent = 'LEVE';
+  chip.appendChild(light);
+  const auto = document.createElement('button');
+  auto.type = 'button';
+  auto.textContent = 'AUTO';
+  chip.appendChild(auto);
   const x = document.createElement('span');
   x.className = 'x';
   x.textContent = '×';
   x.title = 'Fechar sessao';
   chip.appendChild(x);
-  const auto = document.createElement('button');
-  auto.type = 'button';
-  auto.textContent = 'AUTO';
-  chip.appendChild(auto);
-  const view = { chip, dot, label, auto, slot: null };
+  const view = { chip, dot, label, light, auto, slot: null };
   chip.addEventListener('click', () => view.slot && window.launcher.focusSlot(view.slot.id));
   x.addEventListener('click', (e) => {
     e.stopPropagation();
     if (view.slot) window.launcher.removeSlot(view.slot.id);
+  });
+  light.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!view.slot) return;
+    window.launcher.setLightMode(view.slot.id, !view.slot.lightMode).catch(() => {});
   });
   auto.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -232,6 +241,11 @@ function updateChip(view, s) {
   view.dot.className = s.loggedIn ? 'dot on' : 'dot';
   view.dot.title = s.loggedIn ? 'Sessao com login ativo' : 'Sem login';
   view.label.textContent = s.name;
+  const light = s.lightMode === true;
+  view.light.className = `light${light ? ' on' : ''}`;
+  view.light.title = light
+    ? 'Modo leve ligado: cena oculta e CPU poupado; os lancamentos seguem'
+    : 'Modo leve desligado: clique para ocultar a cena e poupar CPU sem parar os lancamentos';
   const enabled = s.automation?.enabled === true;
   view.auto.className = `auto${enabled ? ' on' : ''}`;
   view.auto.dataset.state = s.autoState ?? 'idle';
