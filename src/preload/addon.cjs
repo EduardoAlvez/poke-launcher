@@ -23,7 +23,44 @@ function install(rules) {
   });
 }
 
-ipcRenderer.on('addon:recon', (_event, payload) => {
+/**
+ * A cena esta viva? Amostra o canvas da cena varias vezes: se o desenho
+ * continua, a assinatura muda. Serve para pegar um laco de desenho parado
+ * (e nao a cena escondida, que continua desenhando por baixo do CSS).
+ */
+async function sampleScene(windowMs = 1200) {
+  const canvas = document.querySelector('#cena');
+  if (!canvas || typeof canvas.getContext !== 'function') return { alive: null, samples: 0 };
+  let ctx = null;
+  try {
+    ctx = canvas.getContext('2d');
+  } catch {
+    return { alive: null, samples: 0 };
+  }
+  if (!ctx) return { alive: null, samples: 0 };
+  const w = Math.max(1, Math.min(64, Math.floor(canvas.width / 2)));
+  const h = Math.max(1, Math.min(64, Math.floor(canvas.height / 2)));
+  const x = Math.floor((canvas.width - w) / 2);
+  const y = Math.floor((canvas.height - h) / 2);
+  const sigs = [];
+  const deadline = Date.now() + windowMs;
+  do {
+    let sig;
+    try {
+      const data = ctx.getImageData(x, y, w, h).data;
+      let acc = 0;
+      for (let i = 0; i < data.length; i += 1) acc = (acc * 31 + data[i]) >>> 0;
+      sig = String(acc);
+    } catch (err) {
+      return { alive: null, samples: sigs.length, error: String(err?.message ?? err) };
+    }
+    if (!sigs.includes(sig)) sigs.push(sig);
+    if (Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 200));
+  } while (Date.now() < deadline);
+  return { alive: sigs.length > 1, samples: sigs.length, size: `${canvas.width}x${canvas.height}` };
+}
+
+ipcRenderer.on('addon:recon', async (_event, payload) => {
   const selectors = Array.isArray(payload?.selectors) ? payload.selectors.slice(0, 80) : [];
   const describe = (el) => {
     const rect = el.getBoundingClientRect();
@@ -92,6 +129,7 @@ ipcRenderer.on('addon:recon', (_event, payload) => {
       if (interactive.length >= 40) break;
     }
   }
+  const scene = await sampleScene();
   ipcRenderer.send('addon:recon-result', {
     href: location.href,
     title: document.title,
@@ -101,6 +139,7 @@ ipcRenderer.on('addon:recon', (_event, payload) => {
     focus: document.hasFocus(),
     sessionTaken: Boolean(document.querySelector('#sessao-tomada:not(.hidden)')),
     caidosCount: document.querySelectorAll('#caidos-lista .caido').length,
+    scene,
     found,
     discovered,
     probe,
