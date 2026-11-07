@@ -402,6 +402,13 @@ app.whenReady().then(async () => {
   }
   createWindow();
   await restoreSlots();
+  const lightWatch = setInterval(() => {
+    for (const slot of registry.slots) {
+      if (!slot.lightMode) continue;
+      registry.watchLight(slot).catch(() => {});
+    }
+  }, 20_000);
+  lightWatch.unref?.();
   trayHandle = createTray({
     iconPath: path.join(dirname, '../../assets/icon.png'),
     onShow: showWindow,

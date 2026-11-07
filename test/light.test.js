@@ -10,10 +10,16 @@ import {
   LIGHT_THROTTLE_MS,
   LIGHT_ULTRA_KEY,
   LIGHT_VERIFY,
+  LIGHT_WATCH,
 } from '../src/main/light.js';
 
-function run(script, win, { setT = setTimeout, perf = performance } = {}) {
-  return new Function('window', 'setTimeout', 'performance', `return ${script}`)(win, setT, perf);
+function run(script, win, { setT = setTimeout, clearT = clearTimeout, perf = performance } = {}) {
+  return new Function('window', 'setTimeout', 'clearTimeout', 'performance', `return ${script}`)(
+    win,
+    setT,
+    clearT,
+    perf
+  );
 }
 
 function fakeWindow() {
@@ -44,17 +50,58 @@ test('limita o rAF uma vez, confirma e restaura o original', () => {
 test('cancelar um frame nosso limpa o timeout em vez de vazar', () => {
   const { win } = fakeWindow();
   const cleared = [];
-  let id = null;
   run(LIGHT_APPLY, win, {
-    setT: () => {
-      id = 41;
-      return id;
-    },
+    setT: () => 41,
+    clearT: (id) => cleared.push(id),
   });
   const handle = win.requestAnimationFrame(() => {});
   assert.equal(handle, 41);
   win.cancelAnimationFrame(handle);
+  assert.deepEqual(cleared, [41]);
   assert.equal(win.__pokeLauncherLight.handled.has(41), false);
+});
+
+test('restaurar nao descarta o quadro pendente: o laco do jogo continua', () => {
+  const { win } = fakeWindow();
+  const pending = [];
+  run(LIGHT_APPLY, win, {
+    setT: (cb) => {
+      pending.push(cb);
+      return pending.length;
+    },
+  });
+  let chamadas = 0;
+  win.requestAnimationFrame(() => {
+    chamadas += 1;
+  });
+  assert.equal(run(LIGHT_RESTORE, win), 'restored');
+  pending[0]();
+  assert.equal(chamadas, 1, 'o callback pendente ainda roda (a cena nao congela)');
+});
+
+test('a vigia sai do Modo Economia/Ultra quando o jogo volta para eles', () => {
+  let eco = true;
+  let ultra = false;
+  let ecoClicks = 0;
+  let ultraClicks = 0;
+  const win = {
+    document: {
+      documentElement: { classList: { contains: (c) => (c === 'modo-economia' ? eco : ultra) } },
+      querySelector: (sel) => {
+        if (sel === '#eco-sair' && eco) return { click: () => { ecoClicks += 1; eco = false; } };
+        if (sel === '#ultra-sair' && ultra) return { click: () => { ultraClicks += 1; ultra = false; } };
+        return null;
+      },
+    },
+  };
+  assert.equal(run(LIGHT_WATCH, win), 'exit-economy');
+  assert.equal(ecoClicks, 1);
+  assert.equal(run(LIGHT_WATCH, win), 'ok');
+  eco = false;
+  ultra = true;
+  assert.equal(run(LIGHT_WATCH, win), 'exit-ultra');
+  assert.equal(ultraClicks, 1);
+  assert.equal(run(LIGHT_WATCH, win), 'ok');
 });
 
 test('o rAF limitado agenda por timeout e entrega o relogio de performance', () => {

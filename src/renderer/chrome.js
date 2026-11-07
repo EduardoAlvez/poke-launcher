@@ -224,10 +224,16 @@ function createChip() {
     e.stopPropagation();
     if (view.slot) window.launcher.removeSlot(view.slot.id);
   });
-  light.addEventListener('click', (e) => {
+  light.addEventListener('click', async (e) => {
     e.stopPropagation();
     if (!view.slot) return;
-    window.launcher.setLightMode(view.slot.id, !view.slot.lightMode).catch(() => {});
+    try {
+      const res = await window.launcher.setLightMode(view.slot.id, !view.slot.lightMode);
+      view.lightError = !(res?.ok && res?.applied !== false);
+    } catch {
+      view.lightError = true;
+    }
+    if (view.slot) updateChip(view, view.slot);
   });
   auto.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -242,10 +248,12 @@ function updateChip(view, s) {
   view.dot.title = s.loggedIn ? 'Sessao com login ativo' : 'Sem login';
   view.label.textContent = s.name;
   const light = s.lightMode === true;
-  view.light.className = `light${light ? ' on' : ''}`;
-  view.light.title = light
-    ? 'Modo leve ligado: cena oculta e CPU poupado; os lancamentos seguem'
-    : 'Modo leve desligado: clique para ocultar a cena e poupar CPU sem parar os lancamentos';
+  view.light.className = `light${light ? ' on' : ''}${view.lightError ? ' error' : ''}`;
+  view.light.title = view.lightError
+    ? 'Modo leve nao aplicado nesta sessao: o jogo recusou a preferencia. Clique para tentar de novo.'
+    : light
+      ? 'Modo leve ligado: cena oculta e CPU poupado; os lancamentos seguem'
+      : 'Modo leve desligado: clique para ocultar a cena e poupar CPU sem parar os lancamentos';
   const enabled = s.automation?.enabled === true;
   view.auto.className = `auto${enabled ? ' on' : ''}`;
   view.auto.dataset.state = s.autoState ?? 'idle';

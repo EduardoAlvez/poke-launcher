@@ -78,6 +78,7 @@ button:hover { border-color: var(--accent); }
 }
 .chip .light:hover { color: var(--accent); border-color: var(--accent); }
 .chip .light.on { color: #7cc7ff; border-color: #7cc7ff; }
+.chip .light.error { color: #ff6b6b; border-color: #ff6b6b; }
 button.danger { color: #ff6b6b; border-color: #4a2a2f; }
 button.danger:hover { border-color: #ff6b6b; }
 .muted { color: var(--muted); font-size: 11px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

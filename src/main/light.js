@@ -44,21 +44,64 @@ export const LIGHT_APPLY = `(() => {
   return 'applied';
 })()`;
 
+/**
+ * Desfaz o patch. NÃO cancela os quadros pendentes: o laço da cena se
+ * reagenda dentro do próprio callback, e descartar esse callback congelaria a
+ * cena para sempre. O timeout que sobrou dispara, roda o callback e o laço
+ * continua — agora pelo rAF de verdade.
+ */
 export const LIGHT_RESTORE = `(() => {
   const KEY = '__pokeLauncherLight';
   const state = window[KEY];
   if (!state) return 'absent';
-  for (const id of state.handled) clearTimeout(id);
-  state.handled.clear();
   window.requestAnimationFrame = state.real;
   window.cancelAnimationFrame = state.realCaf;
   delete window[KEY];
   return 'restored';
 })()`;
 
+/** Refaz o patch do zero (a página trocou o rAF depois do nosso). */
+export const LIGHT_REAPPLY = `(() => {
+  const KEY = '__pokeLauncherLight';
+  const state = window[KEY];
+  if (state) {
+    window.requestAnimationFrame = state.real;
+    window.cancelAnimationFrame = state.realCaf;
+    delete window[KEY];
+  }
+  return 'reset';
+})()`;
+
 export const LIGHT_VERIFY = `(() => {
   const state = window.__pokeLauncherLight;
   return !!state && window.requestAnimationFrame === state.wrapped && window.cancelAnimationFrame === state.wrappedCaf;
+})()`;
+
+/**
+ * Vigia o modo do jogo em tempo de execução: se ele voltar para Economia/Ultra
+ * (pelo menu dele), o servidor para de mandar `campo` e o AUTO fica sem alvo.
+ * Sair pela cena é o caminho do próprio jogo — e ele avisa o servidor sozinho.
+ */
+export const LIGHT_WATCH = `(() => {
+  const doc = window.document;
+  const root = doc?.documentElement;
+  const eco = !!root?.classList.contains('modo-economia');
+  const ultra = !!root?.classList.contains('modo-ultra');
+  if (eco) {
+    const btn = doc.querySelector('#eco-sair');
+    if (btn) {
+      btn.click();
+      return 'exit-economy';
+    }
+  }
+  if (ultra) {
+    const btn = doc.querySelector('#ultra-sair');
+    if (btn) {
+      btn.click();
+      return 'exit-ultra';
+    }
+  }
+  return eco || ultra ? 'still-economy' : 'ok';
 })()`;
 
 export const LIGHT_PREFS_ON = `(() => {

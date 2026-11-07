@@ -2,7 +2,16 @@ import { WebContentsView } from 'electron';
 import { computeGrid, popupBounds, TOOLBAR_H } from './layout.js';
 import { installSlotExtensions } from './extensions.js';
 import { registerAddonPreload } from './addons.js';
-import { LIGHT_APPLY, LIGHT_CSS, LIGHT_PREFS_OFF, LIGHT_PREFS_ON, LIGHT_RESTORE, LIGHT_VERIFY } from './light.js';
+import {
+  LIGHT_APPLY,
+  LIGHT_CSS,
+  LIGHT_PREFS_OFF,
+  LIGHT_PREFS_ON,
+  LIGHT_REAPPLY,
+  LIGHT_RESTORE,
+  LIGHT_VERIFY,
+  LIGHT_WATCH,
+} from './light.js';
 
 const DEFAULT_URL = 'https://pokeidle.io/app';
 const MAX_SLOTS = 8;
@@ -57,6 +66,7 @@ export class SlotRegistry {
       lightCssKey: null,
       lightGen: 0,
       lightReloadAt: 0,
+      lightQueue: Promise.resolve(),
     };
     view.webContents.on('render-process-gone', () => this.recreate(slot));
     view.webContents.on('did-finish-load', () => this.syncLight(slot));
@@ -139,84 +149,121 @@ export class SlotRegistry {
   }
 
   /**
+   * Serializa as tarefas de modo leve da sessão. Duas aplicações juntas
+   * brigariam pela chave do CSS injetado (a segunda apagaria a referência da
+   * primeira e a cena ficaria oculta para sempre depois de um OFF).
+   */
+  queueLight(slot, fn) {
+    const run = (slot.lightQueue ?? Promise.resolve()).then(fn, fn);
+    slot.lightQueue = run.catch(() => {});
+    return run;
+  }
+
+  /**
    * Liga o modo leve nesta sessão: tira o jogo de Economia/Ultra (senão o
    * servidor para de mandar `campo`) e recarrega para ele relembrar a escolha.
    * O CSS + o limite de rAF entram no próximo `did-finish-load`.
    */
   async enableLight(slot) {
-    const gen = this.beginLight(slot);
-    slot.lightMode = true;
-    slot.lightReloadAt = 0;
-    const wc = slot.view.webContents;
-    if (wc.isDestroyed()) {
-      slot.lightMode = false;
-      return false;
-    }
-    if (!/^https?:/i.test(wc.getURL())) return true;
-    const off = await wc.executeJavaScript(LIGHT_PREFS_OFF, true).catch(() => false);
-    if (this.lightStale(slot, wc, gen)) return true;
-    if (!off) {
-      console.error(`[${slot.id}] modo leve: localStorage recusou desligar Economia/Ultra`);
-      return false;
-    }
-    wc.reload();
-    return true;
+    return this.queueLight(slot, async () => {
+      const gen = this.beginLight(slot);
+      slot.lightMode = true;
+      slot.lightReloadAt = 0;
+      const wc = slot.view.webContents;
+      if (wc.isDestroyed()) {
+        slot.lightMode = false;
+        return false;
+      }
+      if (!/^https?:/i.test(wc.getURL())) return true;
+      const off = await wc.executeJavaScript(LIGHT_PREFS_OFF, true).catch(() => false);
+      if (this.lightStale(slot, wc, gen)) return true;
+      if (!off) {
+        console.error(`[${slot.id}] modo leve: localStorage recusou desligar Economia/Ultra`);
+        return false;
+      }
+      wc.reload();
+      return true;
+    });
   }
 
   /** Desliga sem recarregar: devolve o rAF original e remove o CSS injetado. */
   async disableLight(slot) {
-    this.beginLight(slot);
-    slot.lightMode = false;
-    slot.lightApplied = false;
-    const wc = slot.view.webContents;
-    if (wc.isDestroyed()) {
+    return this.queueLight(slot, async () => {
+      this.beginLight(slot);
+      slot.lightMode = false;
+      slot.lightApplied = false;
+      const wc = slot.view.webContents;
+      if (wc.isDestroyed()) {
+        slot.lightCssKey = null;
+        return true;
+      }
+      const key = slot.lightCssKey;
       slot.lightCssKey = null;
+      if (key) {
+        try {
+          await wc.removeInsertedCSS(key);
+        } catch (err) {
+          console.error(`[${slot.id}] modo leve: nao consegui remover o CSS:`, err.message);
+        }
+      }
+      try {
+        await wc.executeJavaScript(LIGHT_RESTORE, true);
+      } catch (err) {
+        console.error(`[${slot.id}] modo leve: nao consegui restaurar o rAF:`, err.message);
+      }
       return true;
-    }
-    const key = slot.lightCssKey;
-    slot.lightCssKey = null;
-    if (key) await wc.removeInsertedCSS(key).catch(() => {});
-    await wc.executeJavaScript(LIGHT_RESTORE, true).catch(() => {});
-    return true;
+    });
   }
 
   /**
    * Reaplica num carregamento novo. Se o jogo voltou para Economia/Ultra (a
    * preferência vive no localStorage), zera e recarrega — com uma trava de
-   * 10 s para o caso de o jogo reescrever a preferência em loop.
+   * 10 s para o caso de o jogo reescrever a preferência em loop. Dentro da
+   * trava, sai pela cena (é o jogo que avisa o servidor) e segue aplicando.
    */
   async syncLight(slot) {
     if (!slot.lightMode) return;
-    const gen = slot.lightGen ?? 0;
-    const wc = slot.view.webContents;
-    if (wc.isDestroyed() || !/^https?:/i.test(wc.getURL())) return;
-    const dirty = await wc.executeJavaScript(LIGHT_PREFS_ON, true).catch(() => false);
-    if (this.lightStale(slot, wc, gen)) return;
-    if (dirty) {
-      const now = Date.now();
-      if (slot.lightReloadAt && now - slot.lightReloadAt < 10_000) {
-        console.error(`[${slot.id}] modo leve: Economia/Ultra voltou logo apos o reload; seguindo sem recarregar`);
-      } else {
-        slot.lightReloadAt = now;
+    return this.queueLight(slot, async () => {
+      const gen = slot.lightGen ?? 0;
+      const wc = slot.view.webContents;
+      if (wc.isDestroyed() || !/^https?:/i.test(wc.getURL())) return;
+      const dirty = await wc.executeJavaScript(LIGHT_PREFS_ON, true).catch(() => false);
+      if (this.lightStale(slot, wc, gen)) return;
+      if (dirty) {
+        const now = Date.now();
         const off = await wc.executeJavaScript(LIGHT_PREFS_OFF, true).catch(() => false);
         if (this.lightStale(slot, wc, gen)) return;
-        if (off) {
+        if (!off) {
+          console.error(`[${slot.id}] modo leve: localStorage recusou desligar Economia/Ultra`);
+        } else if (!slot.lightReloadAt || now - slot.lightReloadAt >= 10_000) {
+          slot.lightReloadAt = now;
           wc.reload();
           return;
+        } else {
+          console.error(`[${slot.id}] modo leve: Economia/Ultra voltou; sem recarregar, saindo pela cena`);
         }
-        console.error(`[${slot.id}] modo leve: localStorage recusou desligar Economia/Ultra`);
       }
-    }
-    await this.applyLight(slot);
+      await this.applyLightNow(slot);
+    });
   }
 
   async applyLight(slot) {
+    return this.queueLight(slot, () => this.applyLightNow(slot));
+  }
+
+  async applyLightNow(slot) {
     const gen = slot.lightGen ?? 0;
     const wc = slot.view.webContents;
     if (wc.isDestroyed() || !slot.lightMode) return false;
     const oldKey = slot.lightCssKey;
     slot.lightCssKey = null;
-    if (oldKey) await wc.removeInsertedCSS(oldKey).catch(() => {});
+    if (oldKey) {
+      try {
+        await wc.removeInsertedCSS(oldKey);
+      } catch (err) {
+        console.error(`[${slot.id}] modo leve: nao consegui remover o CSS anterior:`, err.message);
+      }
+    }
     if (this.lightStale(slot, wc, gen)) return false;
     try {
       const key = await wc.insertCSS(LIGHT_CSS, { cssOrigin: 'user' });
@@ -229,8 +276,13 @@ export class SlotRegistry {
       console.error(`[${slot.id}] modo leve css:`, err.message);
     }
     try {
-      const res = await wc.executeJavaScript(LIGHT_APPLY, true);
-      const ok = await wc.executeJavaScript(LIGHT_VERIFY, true).catch(() => false);
+      let res = await wc.executeJavaScript(LIGHT_APPLY, true);
+      let ok = await wc.executeJavaScript(LIGHT_VERIFY, true).catch(() => false);
+      if (ok !== true) {
+        await wc.executeJavaScript(LIGHT_REAPPLY, true).catch(() => {});
+        res = await wc.executeJavaScript(LIGHT_APPLY, true);
+        ok = await wc.executeJavaScript(LIGHT_VERIFY, true).catch(() => false);
+      }
       if (this.lightStale(slot, wc, gen)) return false;
       slot.lightApplied = ok === true;
       if (!slot.lightApplied) {
@@ -241,6 +293,23 @@ export class SlotRegistry {
       slot.lightApplied = false;
     }
     return slot.lightApplied;
+  }
+
+  /**
+   * Vigia o modo do jogo: se ele voltar para Economia/Ultra pelo menu dele,
+   * o servidor para de mandar `campo` e o AUTO fica sem alvo. A volta é pelo
+   * botão da cena — o próprio jogo avisa o servidor quando sai.
+   */
+  async watchLight(slot) {
+    if (!slot.lightMode) return 'off';
+    const wc = slot.view.webContents;
+    if (wc.isDestroyed() || !/^https?:/i.test(wc.getURL())) return 'off';
+    const res = await wc.executeJavaScript(LIGHT_WATCH, true).catch(() => 'error');
+    if (res === 'exit-economy' || res === 'exit-ultra') {
+      const nome = res === 'exit-economy' ? 'Modo Economia' : 'Modo ULTRA Economia';
+      console.log(`[${slot.id}] modo leve: saiu do ${nome} para o campo continuar chegando`);
+    }
+    return res;
   }
 
   setViewsVisible(visible) {
