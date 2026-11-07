@@ -61,6 +61,12 @@ test('parseSlot corta nome longo e zera ratios invalidos', () => {
   assert.equal(res.slot.ratios, null);
 });
 
+test('parseSlot: lightMode e por sessao e desligado por padrao', () => {
+  assert.equal(parseSlot(validSlot).slot.lightMode, false);
+  assert.equal(parseSlot({ ...validSlot, lightMode: true }).slot.lightMode, true);
+  assert.equal(parseSlot({ ...validSlot, lightMode: 'sim' }).slot.lightMode, false);
+});
+
 test('automacao e opt-in: enabled so com consent', () => {
   assert.equal(parseAutomation(undefined).enabled, false);
   assert.equal(parseAutomation({ enabled: true }).enabled, false);

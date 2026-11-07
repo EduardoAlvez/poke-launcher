@@ -23,7 +23,7 @@ function isRatio(value) {
 
 export function parseSlot(raw) {
   if (!raw || typeof raw !== 'object') return { ok: false, error: 'slot nao e objeto' };
-  const { id, name, url, partition, ratios, muted, zoomFactor, automation } = raw;
+  const { id, name, url, partition, ratios, muted, zoomFactor, automation, lightMode } = raw;
   if (typeof id !== 'string' || !/^slot-[a-z0-9-]+$/i.test(id)) {
     return { ok: false, error: `id invalido: ${JSON.stringify(id)}` };
   }
@@ -42,6 +42,7 @@ export function parseSlot(raw) {
     ratios: ratiosOk ? { x: ratios.x, y: ratios.y, w: ratios.w, h: ratios.h } : null,
     muted: muted === true,
     zoomFactor: typeof zoomFactor === 'number' && zoomFactor > 0 && zoomFactor <= 3 ? zoomFactor : 1,
+    lightMode: lightMode === true,
     automation: parseAutomation(automation),
   };
   return { ok: true, slot };
@@ -104,6 +105,7 @@ export function buildSnapshot(previous, slots) {
         ratios: s.ratios ?? prev.ratios ?? null,
         muted: s.muted === true,
         zoomFactor: s.zoomFactor ?? 1,
+        lightMode: s.lightMode === true,
         automation: s.automation ?? null,
       };
     }),
