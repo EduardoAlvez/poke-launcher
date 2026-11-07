@@ -9,6 +9,7 @@ import {
   LIGHT_RESTORE,
   LIGHT_THROTTLE_MS,
   LIGHT_ULTRA_KEY,
+  LIGHT_VERIFY,
 } from '../src/main/light.js';
 
 function run(script, win, { setT = setTimeout, perf = performance } = {}) {
@@ -21,17 +22,39 @@ function fakeWindow() {
     calls.push(cb);
     return calls.length;
   };
-  return { win: { requestAnimationFrame: real }, real, calls };
+  const realCaf = () => {};
+  return { win: { requestAnimationFrame: real, cancelAnimationFrame: realCaf }, real, realCaf, calls };
 }
 
-test('limita o rAF uma vez e restaura o original', () => {
-  const { win, real } = fakeWindow();
+test('limita o rAF uma vez, confirma e restaura o original', () => {
+  const { win, real, realCaf } = fakeWindow();
+  assert.equal(run(LIGHT_VERIFY, win), false);
   assert.equal(run(LIGHT_APPLY, win), 'applied');
   assert.notEqual(win.requestAnimationFrame, real);
+  assert.notEqual(win.cancelAnimationFrame, realCaf);
+  assert.equal(run(LIGHT_VERIFY, win), true);
   assert.equal(run(LIGHT_APPLY, win), 'already');
   assert.equal(run(LIGHT_RESTORE, win), 'restored');
   assert.equal(win.requestAnimationFrame, real);
+  assert.equal(win.cancelAnimationFrame, realCaf);
+  assert.equal(run(LIGHT_VERIFY, win), false);
   assert.equal(run(LIGHT_RESTORE, win), 'absent');
+});
+
+test('cancelar um frame nosso limpa o timeout em vez de vazar', () => {
+  const { win } = fakeWindow();
+  const cleared = [];
+  let id = null;
+  run(LIGHT_APPLY, win, {
+    setT: () => {
+      id = 41;
+      return id;
+    },
+  });
+  const handle = win.requestAnimationFrame(() => {});
+  assert.equal(handle, 41);
+  win.cancelAnimationFrame(handle);
+  assert.equal(win.__pokeLauncherLight.handled.has(41), false);
 });
 
 test('o rAF limitado agenda por timeout e entrega o relogio de performance', () => {
@@ -75,4 +98,6 @@ test('preferencias do jogo viram 0 e o estado sujo e detectavel', () => {
 test('o CSS esconde a cena sem esconder a lista de caidos', () => {
   assert.match(LIGHT_CSS, /#cena/);
   assert.doesNotMatch(LIGHT_CSS, /#caidos/);
+  assert.match(LIGHT_CSS, /#palco \*/);
+  assert.doesNotMatch(LIGHT_CSS, /^\s*\*/m);
 });

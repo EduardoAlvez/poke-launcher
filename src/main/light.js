@@ -14,15 +14,33 @@ export const LIGHT_ULTRA_KEY = 'cfg-ultra';
 export const LIGHT_CSS = `
   /* A cena sai do desenho; o resto da tela (incluindo a lista de caídos) fica. */
   #cena { visibility: hidden !important; }
-  *, *::before, *::after { animation: none !important; transition: none !important; }
+  #palco *, #palco *::before, #palco *::after { animation: none !important; transition: none !important; }
 `;
 
 export const LIGHT_APPLY = `(() => {
   const KEY = '__pokeLauncherLight';
   if (window[KEY]) return 'already';
   const real = window.requestAnimationFrame;
-  window[KEY] = { real };
-  window.requestAnimationFrame = (cb) => setTimeout(() => cb(performance.now()), ${LIGHT_THROTTLE_MS});
+  const realCaf = window.cancelAnimationFrame;
+  const handled = new Set();
+  const wrapped = (cb) => {
+    const id = setTimeout(() => {
+      handled.delete(id);
+      cb(performance.now());
+    }, ${LIGHT_THROTTLE_MS});
+    handled.add(id);
+    return id;
+  };
+  const wrappedCaf = (id) => {
+    if (handled.delete(id)) {
+      clearTimeout(id);
+      return;
+    }
+    if (typeof realCaf === 'function') realCaf.call(window, id);
+  };
+  window[KEY] = { real, realCaf, wrapped, wrappedCaf, handled };
+  window.requestAnimationFrame = wrapped;
+  window.cancelAnimationFrame = wrappedCaf;
   return 'applied';
 })()`;
 
@@ -30,9 +48,17 @@ export const LIGHT_RESTORE = `(() => {
   const KEY = '__pokeLauncherLight';
   const state = window[KEY];
   if (!state) return 'absent';
-  delete window[KEY];
+  for (const id of state.handled) clearTimeout(id);
+  state.handled.clear();
   window.requestAnimationFrame = state.real;
+  window.cancelAnimationFrame = state.realCaf;
+  delete window[KEY];
   return 'restored';
+})()`;
+
+export const LIGHT_VERIFY = `(() => {
+  const state = window.__pokeLauncherLight;
+  return !!state && window.requestAnimationFrame === state.wrapped && window.cancelAnimationFrame === state.wrappedCaf;
 })()`;
 
 export const LIGHT_PREFS_ON = `(() => {

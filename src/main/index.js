@@ -352,11 +352,10 @@ ipcMain.handle('launcher:set-light', async (event, payload) => {
   const slot = registry.get(payload?.id);
   if (!slot) return { ok: false, error: 'sessao inexistente' };
   const on = payload?.on === true;
-  if (on) await registry.enableLight(slot);
-  else await registry.disableLight(slot);
+  const applied = on ? await registry.enableLight(slot) : await registry.disableLight(slot);
   await persist();
   sendState();
-  return { ok: true, lightMode: slot.lightMode === true };
+  return { ok: true, lightMode: slot.lightMode === true, applied };
 });
 
 ipcMain.handle('automation:set', async (event, payload) => {
