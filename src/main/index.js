@@ -67,6 +67,15 @@ const notifier = new Notifier({
   },
 });
 
+registry.onCrash = (slot, info) => {
+  notifier.notify(slot.id, {
+    type: 'session-crash',
+    title: `${slot.name} caiu`,
+    body: `Recarregando em ${Math.round(info.waitMs / 1000)} s`,
+    ts: Date.now(),
+  });
+};
+
 let stateTimer = null;
 let statePending = false;
 
@@ -113,6 +122,7 @@ function pushState() {
       autoLastTick: s.automationStatus?.lastTickAt ?? null,
       autoCaidos: s.automationStatus?.caidos ?? null,
       popups: s.popups.length,
+      crashedUntil: s.crashUntil && s.crashUntil > Date.now() ? s.crashUntil : 0,
     }))
   );
   const anyAuto = registry.slots.filter((s) => s.automation?.enabled).length;

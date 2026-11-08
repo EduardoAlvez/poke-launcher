@@ -28,6 +28,8 @@ export class SlotRegistry {
     this.closingPopups = new WeakSet();
     this.onPopupChange = null;
     this.onLightChange = null;
+    this.onCrash = null;
+    this.disposed = false;
     this.lightMode = new LightMode({ onChange: (slot) => this.onLightChange?.(slot) });
   }
 
@@ -162,25 +164,29 @@ export class SlotRegistry {
   }
 
   recreate(slot) {
-    if (!this.slots.includes(slot)) return;
+    if (this.disposed || slot.removed || !this.slots.includes(slot)) return;
     const now = Date.now();
     slot.crashes = slot.crashes.filter((t) => now - t < 60_000);
     slot.crashes.push(now);
     if (slot.crashes.length >= 3) {
-      if (slot.cooldownAt && now < slot.cooldownAt) return;
-      slot.cooldownAt = now + 30_000;
-      console.error(`[${slot.id}] 3 quedas em 60s — nova tentativa em 30s`);
+      if (slot.crashUntil && now < slot.crashUntil) return;
+      const waitMs = 30_000;
+      slot.crashUntil = now + waitMs;
+      console.error(`[${slot.id}] 3 quedas em 60s — nova tentativa em ${waitMs / 1000}s`);
+      this.onCrash?.(slot, { attempt: slot.crashes.length, waitMs });
       setTimeout(() => {
-        slot.cooldownAt = 0;
-        this.recreate(slot);
-      }, 30_000);
+        if (this.disposed || slot.removed || !this.slots.includes(slot)) return;
+        slot.crashUntil = 0;
+        slot.crashes = [];
+        this.recreateNow(slot);
+      }, waitMs);
     } else {
       this.recreateNow(slot);
     }
   }
 
   recreateNow(slot) {
-    if (!this.slots.includes(slot) || !this.win || this.win.isDestroyed()) return;
+    if (this.disposed || slot.removed || !this.slots.includes(slot) || !this.win || this.win.isDestroyed()) return;
     const dead = slot.view;
     if (this.win.contentView.children.includes(dead)) this.win.contentView.removeChildView(dead);
     if (!dead.webContents.isDestroyed()) dead.webContents.close();
@@ -216,6 +222,7 @@ export class SlotRegistry {
     const i = this.slots.findIndex((s) => s.id === id);
     if (i === -1) return false;
     const [slot] = this.slots.splice(i, 1);
+    slot.removed = true;
     for (const popup of [...slot.popups]) this.closePopup(slot, popup);
     if (this.win && !this.win.isDestroyed() && this.win.contentView.children.includes(slot.view)) {
       this.win.contentView.removeChildView(slot.view);
@@ -226,7 +233,9 @@ export class SlotRegistry {
   }
 
   destroyAll() {
+    this.disposed = true;
     for (const slot of this.slots) {
+      slot.removed = true;
       for (const popup of [...slot.popups]) this.closePopup(slot, popup);
       if (!slot.view.webContents.isDestroyed()) slot.view.webContents.close();
     }

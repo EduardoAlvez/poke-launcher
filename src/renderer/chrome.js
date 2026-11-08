@@ -259,9 +259,14 @@ function createChip() {
 
 function updateChip(view, s) {
   view.slot = s;
-  view.dot.className = s.loggedIn ? 'dot on' : 'dot';
-  view.dot.title = s.loggedIn ? 'Sessao com login ativo' : 'Sem login';
-  view.label.textContent = s.name;
+  const crashIn = s.crashedUntil ? Math.max(0, Math.ceil((s.crashedUntil - Date.now()) / 1000)) : 0;
+  view.dot.className = crashIn > 0 ? 'dot crash' : s.loggedIn ? 'dot on' : 'dot';
+  view.dot.title = crashIn > 0
+    ? `Sessao caiu 3 vezes — recarregando em ${crashIn}s`
+    : s.loggedIn
+      ? 'Sessao com login ativo'
+      : 'Sem login';
+  view.label.textContent = crashIn > 0 ? `${s.name} — caiu, voltando` : s.name;
   const light = s.lightMode === true;
   const failed = view.lightError || s.lightFailed === true;
   view.light.className = `light${light ? ' on' : ''}${failed ? ' error' : ''}`;
