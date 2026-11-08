@@ -9,6 +9,8 @@ const CWS_URL =
   `&x=id%3D${CWS_ID}%26installsource%3DONDemand%26uc`;
 const HOSTS = ['pokeidle.io'];
 const CACHE_MS = 24 * 60 * 60 * 1000;
+// Sem timeout, uma rede travada prendia a criacao/restauracao das sessoes.
+const FETCH_TIMEOUT_MS = 20_000;
 const loaded = new WeakSet();
 let liveLoads = 0;
 
@@ -32,7 +34,7 @@ async function freshInfo(markerPath) {
 }
 
 async function downloadCrx(destDir, markerPath) {
-  const res = await fetch(CWS_URL, { redirect: 'follow' });
+  const res = await fetch(CWS_URL, { redirect: 'follow', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`CWS HTTP ${res.status}`);
   const buf = Buffer.from(await res.arrayBuffer());
   let zipStart = -1;
@@ -70,11 +72,24 @@ async function ensureExtensionDir(destDir, markerPath) {
   return ensureExtensionDir.pending;
 }
 
+export function extensionPaths() {
+  const destDir = path.join(app.getPath('userData'), 'extensions', CWS_ID);
+  return { destDir, markerPath: `${destDir}.info.json` };
+}
+
+/**
+ * Baixa a extensao no boot, em paralelo com a janela: assim o primeiro slot
+ * nao espera a rede para comecar a carregar.
+ */
+export function warmExtensionCache() {
+  const { destDir, markerPath } = extensionPaths();
+  return ensureExtensionDir(destDir, markerPath);
+}
+
 export async function installSlotExtensions(session, slotUrl) {
   if (!matchesGame(slotUrl)) return;
   if (loaded.has(session)) return;
-  const destDir = path.join(app.getPath('userData'), 'extensions', CWS_ID);
-  const markerPath = `${destDir}.info.json`;
+  const { destDir, markerPath } = extensionPaths();
   await ensureExtensionDir(destDir, markerPath);
   const ext = await session.loadExtension(destDir, { allowFileAccess: false, hotReload: false });
   loaded.add(session);

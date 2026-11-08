@@ -9,6 +9,7 @@ import { createTray } from './tray.js';
 import { loadPack, buildAddonPreload, applyPackCss, sendPackRules, loadAutomationPack, auditPack, collectSelectors } from './addons.js';
 import { LIGHT_SAMPLE_SCENE } from './light.js';
 import { AutomationController, RISK_TEXT } from './automation.js';
+import { warmExtensionCache } from './extensions.js';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 // Uma instancia so: o dev e o app instalado compartilham o mesmo userData, e
@@ -429,6 +430,9 @@ app.whenReady().then(async () => {
   } catch (err) {
     console.error('[addons] pack/preload indisponivel:', err.message);
   }
+  warmExtensionCache().catch((err) =>
+    console.error('[extensions] download em segundo plano:', err.message)
+  );
   createWindow();
   await restoreSlots();
   const lightWatch = setInterval(() => {
