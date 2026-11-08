@@ -11,6 +11,16 @@ import { LIGHT_SAMPLE_SCENE } from './light.js';
 import { AutomationController, RISK_TEXT } from './automation.js';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
+// Uma instancia so: o dev e o app instalado compartilham o mesmo userData, e
+// dois processos escrevendo slots.json/particoes ao mesmo tempo corrompem os
+// logins (o Chromium trava o diretorio da particao).
+const singleInstance = app.requestSingleInstanceLock();
+if (!singleInstance) {
+  console.error('[app] outra instancia ja esta rodando; encerrando esta');
+  app.quit();
+} else {
+  app.on('second-instance', () => showWindow());
+}
 const registry = new SlotRegistry();
 registry.onPopupChange = () => sendState();
 registry.onLightChange = () => sendState();
@@ -388,6 +398,7 @@ ipcMain.handle('automation:risk-text', (event) => {
 });
 
 app.whenReady().then(async () => {
+  if (!singleInstance) return;
   app.setAppUserModelId(app.isPackaged ? 'dev.pokelauncher.app' : process.execPath);
   Notification.handleActivation?.(() => showWindow());
   store = new SlotStore(path.join(app.getPath('userData'), 'slots.json'));
