@@ -125,6 +125,7 @@
     let total = 0;
     let ticks = 0;
     let lastTickAt = null;
+    let lastThrowAt = null;
     let stopped = false;
     let economyExited = false;
     let lastState = null;
@@ -190,6 +191,7 @@
             clickTarget(target, doc);
             throwsInWindow += 1;
             total += 1;
+            lastThrowAt = Date.now();
             report('clicking');
           } else {
             report('waiting-button');
@@ -225,8 +227,22 @@
     }
     schedule();
 
+    /**
+     * "Capturou" tambem aparece em outros paineis, entao o modo ate-capturar
+     * so aceita a regra quando ela chega logo depois de um arremesso nosso.
+     */
+    const onRule = (ruleId) => {
+      if (stopped || config.mode !== 'until-catch' || !pack?.stopOnRule) return false;
+      if (ruleId !== pack.stopOnRule) return false;
+      const windowMs = Math.max(1000, config.captureWindowMs ?? 20_000);
+      if (lastThrowAt === null || Date.now() - lastThrowAt > windowMs) return false;
+      stop('captured');
+      return true;
+    };
+
     return {
       stop,
+      onRule,
       getTotal: () => total,
       getTicks: () => ticks,
       isRunning: () => !stopped,

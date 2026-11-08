@@ -15,10 +15,7 @@ function install(rules) {
     rules,
     emit: (evt) => ipcRenderer.send('game-event', evt),
     onRule: (ruleId) => {
-      const cfg = globalThis.PokeAutomationConfig;
-      if (cfg?.enabled && cfg.mode === 'until-catch' && ruleId === globalThis.PokeAutomationPack?.stopOnRule) {
-        globalThis.PokeAutomationHandle?.stop('captured');
-      }
+      globalThis.PokeAutomationHandle?.onRule?.(ruleId);
     },
   });
 }
@@ -125,8 +122,6 @@ ipcRenderer.on('automation:config', (_event, payload) => {
   lastAutomationJson = key;
 
   const automation = globalThis.PokeAutomation;
-  globalThis.PokeAutomationConfig = config;
-  globalThis.PokeAutomationPack = payload?.pack ?? null;
   globalThis.PokeAutomationHandle?.stop?.('reconfigurado');
   globalThis.PokeAutomationHandle = null;
   if (!config?.enabled) {

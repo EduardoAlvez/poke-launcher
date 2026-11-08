@@ -378,3 +378,54 @@ test('exitEconomy=false nao mexe no Modo Economia', () => {
   assert.equal(events.at(-1).state, 'economy-mode');
   handle.stop();
 });
+
+test('until-catch so para perto de um arremesso', async () => {
+  let clicks = 0;
+  const doc = {
+    body: { textContent: '' },
+    defaultView: null,
+    querySelector: (selector) =>
+      selector === '.caido' ? { textContent: '', hidden: false, click: () => { clicks += 1; } } : null,
+  };
+  const win = {
+    crypto: { getRandomValues: (arr) => { arr[0] = 1; return arr; } },
+    setTimeout: (fn, ms) => setTimeout(fn, ms),
+    clearTimeout: (id) => clearTimeout(id),
+  };
+  const estados = [];
+  const handle = installAutomation({
+    config: { enabled: true, mode: 'until-catch', intervalMs: 500, jitterMs: 0, maxPerMin: 60 },
+    pack: { clickCandidates: ['.caido'], pauseSelectors: [], pauseText: [], stopOnRule: 'pokemon-caught' },
+    emit: (evt) => estados.push(evt.state),
+    doc,
+    win,
+  });
+  assert.equal(handle.onRule('pokemon-caught'), false, 'sem arremesso recente nao para');
+  assert.equal(handle.isRunning(), true);
+  await new Promise((r) => setTimeout(r, 700));
+  assert.ok(clicks > 0, `arremessou antes do evento (${clicks})`);
+  assert.equal(handle.onRule('outra-regra'), false, 'regra que nao e a de captura nao para');
+  assert.equal(handle.onRule('pokemon-caught'), true, 'parou logo apos o arremesso');
+  assert.equal(handle.isRunning(), false);
+  assert.equal(estados.at(-1), 'captured');
+  handle.stop();
+});
+
+test('until-catch nao para com evento de captura atrasado', async () => {
+  const doc = {
+    body: { textContent: '' },
+    defaultView: null,
+    querySelector: () => null,
+  };
+  const win = { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (id) => clearTimeout(id) };
+  const handle = installAutomation({
+    config: { enabled: true, mode: 'until-catch', intervalMs: 500, jitterMs: 0, maxPerMin: 60 },
+    pack: { clickCandidates: ['.caido'], pauseSelectors: [], pauseText: [], stopOnRule: 'pokemon-caught' },
+    emit: () => {},
+    doc,
+    win,
+  });
+  await new Promise((r) => setTimeout(r, 700));
+  assert.equal(handle.onRule('pokemon-caught'), false, 'nunca arremessou: nao ha captura nossa');
+  handle.stop();
+});
