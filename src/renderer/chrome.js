@@ -217,12 +217,27 @@ function createChip() {
   x.className = 'x';
   x.textContent = '×';
   x.title = 'Fechar sessao';
+  x.setAttribute('role', 'button');
+  x.tabIndex = 0;
   chip.appendChild(x);
   const view = { chip, dot, label, light, auto, slot: null };
   chip.addEventListener('click', () => view.slot && window.launcher.focusSlot(view.slot.id));
+  const fechar = () => {
+    if (!view.slot) return;
+    const ok = window.confirm(
+      `Remover a sessao "${view.slot.name}"?\n\nO login dela sai do launcher (a particao fica 14 dias na quarentena).`
+    );
+    if (ok) window.launcher.removeSlot(view.slot.id);
+  };
   x.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (view.slot) window.launcher.removeSlot(view.slot.id);
+    fechar();
+  });
+  x.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    e.stopPropagation();
+    fechar();
   });
   light.addEventListener('click', async (e) => {
     e.stopPropagation();
