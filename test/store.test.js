@@ -138,16 +138,37 @@ test('SlotStore: primaria e backup invalidos caem em defaults com aviso', async 
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-test('sweepOrphanPartitions remove apenas particoes fora do estado', async () => {
+test('sweepOrphanPartitions move particoes orfas para a quarentena', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pokopart-'));
+  const trash = `${dir}-trash`;
   await fs.mkdir(path.join(dir, 'slot-1'), { recursive: true });
   await fs.mkdir(path.join(dir, 'slot-9'), { recursive: true });
   await fs.writeFile(path.join(dir, 'nao-e-pasta'), 'x');
   const res = await sweepOrphanPartitions(dir, ['persist:slot-1'], { log: () => {} });
   assert.deepEqual(res.removed, ['slot-9']);
   assert.deepEqual(res.kept, ['slot-1']);
+  assert.deepEqual(res.failed, []);
   assert.equal(await fs.stat(path.join(dir, 'slot-1')).then(() => true), true);
+  assert.equal(await fs.stat(path.join(dir, 'slot-9')).then(() => true, () => false), false, 'saiu das particoes');
+  const guardadas = await fs.readdir(trash);
+  assert.equal(guardadas.length, 1, 'a particao foi guardada, nao apagada');
+  assert.ok(guardadas[0].startsWith('slot-9.'), 'nome guarda o slot e a data');
   await fs.rm(dir, { recursive: true, force: true });
+  await fs.rm(trash, { recursive: true, force: true });
+});
+
+test('quarentena expirada e apagada depois do prazo', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pokopart-'));
+  const trash = `${dir}-trash`;
+  const velha = path.join(trash, 'slot-9.2020-01-01T00-00-00-000Z');
+  await fs.mkdir(velha, { recursive: true });
+  const antiga = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000);
+  await fs.utimes(velha, antiga, antiga);
+  const res = await sweepOrphanPartitions(dir, [], { log: () => {} });
+  assert.deepEqual(res.removed, []);
+  assert.deepEqual(await fs.readdir(trash), []);
+  await fs.rm(dir, { recursive: true, force: true });
+  await fs.rm(trash, { recursive: true, force: true });
 });
 
 test('sweepOrphanPartitions tolera raiz inexistente', async () => {

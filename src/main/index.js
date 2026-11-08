@@ -392,6 +392,14 @@ app.whenReady().then(async () => {
   Notification.handleActivation?.(() => showWindow());
   store = new SlotStore(path.join(app.getPath('userData'), 'slots.json'));
   const loaded = await store.read();
+  if (loaded.source === 'defaults' && loaded.warnings.length > 0) {
+    // Nao sobrescrever um estado ilegivel: guarda o arquivo para recuperacao
+    // manual antes que o restore crie uma sessao nova por cima.
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const kept = `${store.filePath}.corrupt-${stamp}`;
+    await fs.rename(store.filePath, kept).catch(() => {});
+    console.error(`[store] slots.json ilegivel preservado em ${kept}`);
+  }
   persisted = loaded.state;
   if (loaded.source !== 'defaults' || loaded.warnings.length === 0) {
     await sweepOrphanPartitions(

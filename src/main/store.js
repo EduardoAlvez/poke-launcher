@@ -179,26 +179,68 @@ export function partitionDirName(partition) {
   return partition.startsWith('persist:') ? partition.slice('persist:'.length) : partition;
 }
 
-export async function sweepOrphanPartitions(partitionsRoot, validPartitions, { log = console.error } = {}) {
+/**
+ * Particoes fora do estado vao para a QUARENTENA em vez de serem apagadas: um
+ * clique errado no "x", um slots.json ilegivel ou uma restauracao parcial nao
+ * podem custar o login de uma conta. A quarentena e limpa por idade.
+ */
+export async function sweepOrphanPartitions(
+  partitionsRoot,
+  validPartitions,
+  { log = console.error, trashRoot = `${partitionsRoot}-trash`, maxAgeDays = 14, now = Date.now() } = {}
+) {
+  const removed = [];
+  const kept = [];
+  const failed = [];
+  const purge = async () => {
+    let entries;
+    try {
+      entries = await fs.readdir(trashRoot, { withFileTypes: true });
+    } catch (err) {
+      if (err.code === 'ENOENT') return;
+      throw err;
+    }
+    const maxAge = maxAgeDays * 24 * 60 * 60 * 1000;
+    for (const entry of entries) {
+      const target = path.join(trashRoot, entry.name);
+      try {
+        const st = await fs.stat(target);
+        if (now - st.mtimeMs > maxAge) {
+          await fs.rm(target, { recursive: true, force: true });
+          log(`[store] quarentena expirada removida: ${entry.name}`);
+        }
+      } catch {
+        /* sumiu no meio do caminho */
+      }
+    }
+  };
+  await purge();
   let entries;
   try {
     entries = await fs.readdir(partitionsRoot, { withFileTypes: true });
   } catch (err) {
-    if (err.code === 'ENOENT') return { removed: [], kept: [] };
+    if (err.code === 'ENOENT') return { removed, kept, failed };
     throw err;
   }
   const valid = new Set(validPartitions.map(partitionDirName));
-  const removed = [];
-  const kept = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     if (valid.has(entry.name)) {
       kept.push(entry.name);
       continue;
     }
-    await fs.rm(path.join(partitionsRoot, entry.name), { recursive: true, force: true });
-    removed.push(entry.name);
+    const stamp = new Date(now).toISOString().replace(/[:.]/g, '-');
+    const target = path.join(trashRoot, `${entry.name}.${stamp}`);
+    try {
+      await fs.mkdir(trashRoot, { recursive: true });
+      await fs.rename(path.join(partitionsRoot, entry.name), target);
+      await fs.utimes(target, new Date(now), new Date(now)).catch(() => {});
+      removed.push(entry.name);
+    } catch (err) {
+      failed.push(entry.name);
+      log(`[store] nao consegui mover ${entry.name} para a quarentena: ${err.message}`);
+    }
   }
-  if (removed.length) log(`[store] particoes orfas removidas: ${removed.join(', ')}`);
-  return { removed, kept };
+  if (removed.length) log(`[store] particoes orfas em quarentena (${trashRoot}): ${removed.join(', ')}`);
+  return { removed, kept, failed };
 }
