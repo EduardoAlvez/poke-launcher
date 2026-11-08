@@ -10,11 +10,31 @@ import { loadPack, buildAddonPreload, applyPackCss, sendPackRules, loadAutomatio
 import { LIGHT_SAMPLE_SCENE } from './light.js';
 import { AutomationController, RISK_TEXT } from './automation.js';
 import { warmExtensionCache } from './extensions.js';
+import { openLog } from './log.js';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 // Uma instancia so: o dev e o app instalado compartilham o mesmo userData, e
 // dois processos escrevendo slots.json/particoes ao mesmo tempo corrompem os
 // logins (o Chromium trava o diretorio da particao).
+let appLog = null;
+function getLog() {
+  if (!appLog) appLog = openLog(path.join(app.getPath('userData'), 'launcher.log'));
+  return appLog;
+}
+// Um erro async nao pode sumir sem rastro (e nem derrubar o launcher): fica
+// no launcher.log para suporte.
+process.on('uncaughtException', (err) => {
+  getLog().exception('uncaughtException', err);
+  console.error('[app] excecao nao tratada:', err);
+});
+process.on('unhandledRejection', (reason) => {
+  getLog().exception('unhandledRejection', reason);
+  console.error('[app] promessa rejeitada sem tratamento:', reason);
+});
+app.on('child-process-gone', (_event, details) => {
+  getLog().error(`child-process-gone: ${JSON.stringify(details)}`);
+});
+
 const singleInstance = app.requestSingleInstanceLock();
 if (!singleInstance) {
   console.error('[app] outra instancia ja esta rodando; encerrando esta');
