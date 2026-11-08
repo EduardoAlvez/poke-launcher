@@ -2,7 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 export const SCHEMA_VERSION = 1;
-export const DEFAULT_MAX_SLOTS = 2;
+export const DEFAULT_MAX_SLOTS = 8;
+export const MAX_SLOTS_LIMIT = 16;
 
 export function defaultState() {
   return { schemaVersion: SCHEMA_VERSION, maxSlots: DEFAULT_MAX_SLOTS, slots: [] };
@@ -88,7 +89,10 @@ export function parseState(rawText) {
     seen.add(parsed.slot.id);
     slots.push(parsed.slot);
   }
-  const maxSlots = Number.isInteger(data.maxSlots) && data.maxSlots > 0 ? data.maxSlots : DEFAULT_MAX_SLOTS;
+  // O limite nunca fica abaixo das sessoes ja salvas: restaurar acima do
+  // limite descartaria a sessao (e a particao dela seria varrida depois).
+  const stored = Number.isInteger(data.maxSlots) && data.maxSlots > 0 ? data.maxSlots : DEFAULT_MAX_SLOTS;
+  const maxSlots = Math.max(Math.min(MAX_SLOTS_LIMIT, stored), slots.length);
   return { ok: true, state: { schemaVersion: SCHEMA_VERSION, maxSlots, slots } };
 }
 

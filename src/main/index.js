@@ -258,7 +258,7 @@ ipcMain.handle('launcher:add-slot', async (event, payload) => {
   }
   if (!/^https?:$/.test(parsed.protocol)) throw new Error('Somente http(s)');
   if (registry.slots.length >= persisted.maxSlots) {
-    throw new Error(`Limite de ${persisted.maxSlots} sessoes no plano atual`);
+    throw new Error(`Limite de ${persisted.maxSlots} sessoes`);
   }
   await registry.add(name, parsed.href, { maxSlots: persisted.maxSlots });
   await persist();

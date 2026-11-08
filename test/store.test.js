@@ -31,6 +31,24 @@ test('parseState aceita estado valido', () => {
   assert.equal(res.state.maxSlots, 4);
 });
 
+test('maxSlots padrao e 8 e nunca fica abaixo das sessoes salvas', () => {
+  const semLimite = parseState(JSON.stringify({ schemaVersion: SCHEMA_VERSION, slots: [validSlot] }));
+  assert.equal(semLimite.state.maxSlots, 8, 'sem maxSlots no arquivo, o padrao e 8');
+
+  const slots = ['1', '2', '3', '4', '5'].map((n) => ({
+    ...validSlot,
+    id: `slot-${n}`,
+    partition: `persist:slot-${n}`,
+  }));
+  const apertado = parseState(JSON.stringify({ schemaVersion: SCHEMA_VERSION, maxSlots: 2, slots }));
+  assert.equal(apertado.state.maxSlots, 5, 'restaurar nao pode descartar sessoes salvas');
+
+  const gigante = parseState(JSON.stringify({ schemaVersion: SCHEMA_VERSION, maxSlots: 999, slots: [validSlot] }));
+  assert.equal(gigante.state.maxSlots, 16, 'limite absurdo e contido');
+
+  assert.equal(defaultState().maxSlots, 8);
+});
+
 test('parseState recusa json quebrado, versao nova, ids duplicados e partition errada', () => {
   assert.equal(parseState('{nao json').ok, false);
   assert.equal(parseState(JSON.stringify({ schemaVersion: 99, slots: [] })).ok, false);
