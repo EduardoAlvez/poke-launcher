@@ -69,3 +69,24 @@ test('addon preload gerado e JS valido e contem os tres blocos', async () => {
   const { Script } = await import('node:vm');
   assert.doesNotThrow(() => new Script(code), 'preload gerado nao compila');
 });
+
+test('applyPackCss troca a chave do CSS em vez de empilhar copias', async () => {
+  const { applyPackCss } = await import('../src/main/addons.js');
+  const calls = [];
+  const wc = {
+    insertCSS: async () => {
+      calls.push('insert');
+      return `k${calls.length}`;
+    },
+    removeInsertedCSS: async (key) => {
+      calls.push(`remove:${key}`);
+    },
+  };
+  const pack = { css: ['.chat-vao { max-height: 32vh !important; }'] };
+  const k1 = await applyPackCss(wc, pack);
+  const k2 = await applyPackCss(wc, pack, k1);
+  assert.equal(k1, 'k1');
+  assert.equal(k2, 'k3');
+  assert.deepEqual(calls, ['insert', 'remove:k1', 'insert']);
+  assert.equal(await applyPackCss(wc, { css: [] }), null, 'pack sem CSS nao insere nada');
+});

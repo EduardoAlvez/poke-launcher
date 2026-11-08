@@ -143,16 +143,26 @@ export async function registerAddonPreload(session, preloadPath, url) {
   });
 }
 
-export function applyPackCss(webContents, pack) {
+/**
+ * Insere o CSS do pack e devolve a chave, para a proxima navegacao no mesmo
+ * documento (SPA) remover o anterior em vez de empilhar copias.
+ */
+export async function applyPackCss(webContents, pack, previousKey = null) {
   const css = (pack.css ?? []).join('\n');
-  if (!css.trim()) return Promise.resolve(false);
-  return webContents.insertCSS(css, { cssOrigin: 'user' }).then(
-    () => true,
-    (err) => {
-      console.error('[addons] CSS nao aplicado:', err.message);
-      return false;
+  if (!css.trim()) return null;
+  if (previousKey) {
+    try {
+      await webContents.removeInsertedCSS(previousKey);
+    } catch {
+      /* o documento anterior ja saiu */
     }
-  );
+  }
+  try {
+    return await webContents.insertCSS(css, { cssOrigin: 'user' });
+  } catch (err) {
+    console.error('[addons] CSS nao aplicado:', err.message);
+    return null;
+  }
 }
 
 export function sendPackRules(webContents, pack) {

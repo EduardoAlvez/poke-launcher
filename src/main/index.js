@@ -205,6 +205,7 @@ function showWindow() {
 function wireAddonPack() {
   if (!addonPack) return;
   const injected = new Map();
+  const cssKeys = new Map();
   app.on('web-contents-created', (_e, contents) => {
     if (contents === win?.webContents) return;
     const apply = () => {
@@ -214,7 +215,10 @@ function wireAddonPack() {
       const url = contents.getURL();
       if (injected.get(contents.id) !== url) {
         injected.set(contents.id, url);
-        applyPackCss(contents, addonPack);
+        applyPackCss(contents, addonPack, cssKeys.get(contents.id) ?? null).then((key) => {
+          if (key) cssKeys.set(contents.id, key);
+          else cssKeys.delete(contents.id);
+        });
         sendPackRules(contents, addonPack);
       }
       if (!isMainView) return;
@@ -231,7 +235,10 @@ function wireAddonPack() {
     contents.on('dom-ready', apply);
     contents.on('did-finish-load', apply);
     contents.on('did-navigate-in-page', apply);
-    contents.on('destroyed', () => injected.delete(contents.id));
+    contents.on('destroyed', () => {
+      injected.delete(contents.id);
+      cssKeys.delete(contents.id);
+    });
   });
 }
 
