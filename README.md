@@ -19,11 +19,11 @@ Baixe o instalador na página de releases:
 ## Recursos
 
 - **Sessões isoladas**: até 8 contas lado a lado, cada uma com cookies/armazenamento próprios
-  (`persist:slot-N`). Adicionar, renomear e remover pela toolbar.
+  (`persist:slot-N`). Adicionar e remover pela toolbar.
 - **Grade ajustável**: 1, 2 ou 3 colunas (o padrão é 2).
 - **Bandeja**: fecha para a bandeja com `X`; menu com Abrir, Silenciar, Parar automações e Encerrar.
 - **Notificações nativas** por evento do jogo (captura, poucas bolas, boss, ovo), com cooldown,
-  limite de taxa, horário de silêncio e botão de silenciar.
+  limite de taxa e botão de silenciar na bandeja.
 - **Sessões continuam rodando** minimizadas, na bandeja e com a tela travada
   (`backgroundThrottling: false`).
 - **Addons por jogo** (carregados como dados, sem código remoto):
@@ -73,7 +73,7 @@ faz o oposto: mantém o campo chegando e corta o custo por fora.
 O custo esperado fica próximo do Modo Economia do jogo, mas com o `campo` ainda chegando — é isso
 que permite lançar bola numa máquina fraca.
 
-Dois modos: **intervalo fixo** e **até capturar** (para após detectar uma captura). A parada por
+Dois modos: **intervalo fixo** e **até capturar** (para quando a captura chega até 20 s depois de um arremesso). A parada por
 captura é registrada no processo principal: o `AUTO` fica vermelho, a sessão é desligada e é preciso
 marcar o aviso de novo para reativar. Cada sessão usa a própria conta; a mesma conta em dois slots
 derruba a primeira (o jogo fecha a sessão antiga). A automação está incluída na versão gratuita.
@@ -94,9 +94,9 @@ npm run dist     # gera instalador (Windows: NSIS; Linux: deb)
 
 ## Dados e privacidade
 
-Tudo é local. O estado fica em `app.getPath('userData')` (`state.json` + backup `.bak`), os cookies
-ficam nas partições do Chromium e a extensão é extraída em `userData/extensions`. Nenhum dado é
-enviado para servidores do launcher.
+Tudo é local. O estado fica em `app.getPath('userData')` (`slots.json` + backup `.bak`), os cookies
+ficam nas partições do Chromium e a extensão é extraída em `userData/extensions`. Erros ficam em
+`launcher.log` na mesma pasta (rotacionado em 1 MB). Nenhum dado é enviado para servidores do launcher.
 
 ## Estrutura
 
