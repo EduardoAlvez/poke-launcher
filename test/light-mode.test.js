@@ -8,7 +8,7 @@ const URL_JOGO = 'https://pokeidle.io/app';
  * webContents falso: roda os scripts do modo leve contra uma `window` falsa,
  * como o navegador faria, e guarda o que foi inserido.
  */
-function fakeWebContents({ url = URL_JOGO, destroy = false } = {}) {
+function fakeWebContents({ url = URL_JOGO, destroy = false, failRaf = false } = {}) {
   const win = {
     requestAnimationFrame: (cb) => {
       win.__frames.push(cb);
@@ -51,6 +51,7 @@ function fakeWebContents({ url = URL_JOGO, destroy = false } = {}) {
       state.css.delete(key);
     },
     executeJavaScript: async (code) => {
+      if (failRaf && code.includes('window.requestAnimationFrame = wrapped')) throw new Error('rAF bloqueado');
       const fn = new Function(
         'window',
         'setTimeout',
@@ -79,16 +80,48 @@ function fakeSlot(wc, extra = {}) {
   };
 }
 
-test('ligar zera as preferencias do jogo e recarrega a sessao', async () => {
+test('ligar em Economia/Ultra zera as preferencias e recarrega a sessao', async () => {
   const { wc, win, state } = fakeWebContents();
   const slot = fakeSlot(wc);
   const light = new LightMode();
+  win.localStorage.setItem('cfg-economia', '1');
   const applied = await light.enable(slot);
   assert.equal(applied, true);
   assert.equal(slot.lightMode, true);
   assert.equal(state.reloads, 1);
   assert.equal(win.localStorage.getItem('cfg-economia'), '0');
   assert.equal(win.localStorage.getItem('cfg-ultra'), '0');
+});
+
+test('ligar com as preferencias limpas aplica na hora, sem recarregar', async () => {
+  const { wc, win, state } = fakeWebContents();
+  const slot = fakeSlot(wc);
+  const light = new LightMode();
+  const applied = await light.enable(slot);
+  assert.equal(applied, true);
+  assert.equal(state.reloads, 0, 'quem esta cacando nao perde a sessao a toa');
+  assert.equal(state.css.size, 1);
+  assert.ok(win.__pokeLauncherLight, 'o limitador entrou no documento atual');
+});
+
+test('falha do rAF nao deixa a cena escondida sem economia', async () => {
+  const { wc, state } = fakeWebContents({ failRaf: true });
+  const slot = fakeSlot(wc, { lightMode: true });
+  const light = new LightMode();
+  const ok = await light.applyNow(slot);
+  assert.equal(ok, false);
+  assert.equal(slot.lightFailed, true);
+  assert.equal(slot.lightCssKey, null);
+  assert.equal(state.css.size, 0, 'o CSS saiu junto: nada de cena escondida a 60 fps');
+});
+
+test('desligar limpa o aviso de falha do chip', async () => {
+  const { wc, win } = fakeWebContents();
+  const slot = fakeSlot(wc, { lightMode: true, lightApplied: false, lightFailed: true });
+  const light = new LightMode();
+  await light.disable(slot);
+  assert.equal(slot.lightFailed, false, 'o chip nao fica vermelho com o modo desligado');
+  assert.equal(win.__pokeLauncherLight, undefined);
 });
 
 test('ligar com a view morta nao finge que ligou', async () => {

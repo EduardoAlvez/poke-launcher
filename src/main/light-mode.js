@@ -40,9 +40,11 @@ export class LightMode {
   }
 
   /**
-   * Liga o modo leve nesta sessão: tira o jogo de Economia/Ultra (senão o
-   * servidor para de mandar `campo`) e recarrega para ele relembrar a escolha.
-   * O CSS + o limite de rAF entram no próximo `did-finish-load`.
+   * Liga o modo leve nesta sessão. Se o jogo estiver em Economia/Ultra (a
+   * preferência vive no localStorage), zera e recarrega para ele relembrar a
+   * escolha; se já estiver fora, aplica na hora — recarregar sem necessidade
+   * só atrapalha quem está caçando. O CSS + o limite de rAF entram no próprio
+   * documento ou no próximo `did-finish-load`.
    */
   async enable(slot) {
     return this.queue(slot, async () => {
@@ -55,6 +57,9 @@ export class LightMode {
         return false;
       }
       if (!/^https?:/i.test(wc.getURL())) return true;
+      const dirty = await wc.executeJavaScript(LIGHT_PREFS_ON, true).catch(() => false);
+      if (this.stale(slot, wc, gen)) return true;
+      if (!dirty) return this.applyNow(slot);
       const off = await wc.executeJavaScript(LIGHT_PREFS_OFF, true).catch(() => false);
       if (this.stale(slot, wc, gen)) return true;
       if (!off) {
@@ -72,6 +77,7 @@ export class LightMode {
       this.begin(slot);
       slot.lightMode = false;
       slot.lightApplied = false;
+      slot.lightFailed = false;
       const wc = slot.view.webContents;
       if (wc.isDestroyed()) {
         slot.lightCssKey = null;
@@ -145,13 +151,14 @@ export class LightMode {
       }
     }
     if (this.stale(slot, wc, gen)) return false;
+    let cssKey = null;
     try {
-      const key = await wc.insertCSS(LIGHT_CSS, { cssOrigin: 'user' });
+      cssKey = await wc.insertCSS(LIGHT_CSS, { cssOrigin: 'user' });
       if (this.stale(slot, wc, gen)) {
-        await wc.removeInsertedCSS(key).catch(() => {});
+        await wc.removeInsertedCSS(cssKey).catch(() => {});
         return false;
       }
-      slot.lightCssKey = key;
+      slot.lightCssKey = cssKey;
     } catch (err) {
       console.error(`[${slot.id}] modo leve css:`, err.message);
     }
@@ -173,6 +180,12 @@ export class LightMode {
       console.error(`[${slot.id}] modo leve rAF:`, err.message);
       slot.lightApplied = false;
       slot.lightFailed = true;
+    }
+    if (!slot.lightApplied && cssKey) {
+      // Sem limitar o rAF, esconder a cena só tira o feedback e deixa o custo
+      // de desenho: desfaz o CSS para não ficar no pior dos dois mundos.
+      await wc.removeInsertedCSS(cssKey).catch(() => {});
+      if (slot.lightCssKey === cssKey) slot.lightCssKey = null;
     }
     this.onChange?.(slot);
     return slot.lightApplied;
