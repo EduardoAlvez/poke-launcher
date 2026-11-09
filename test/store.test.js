@@ -199,3 +199,18 @@ test('clampZoom prende entre 50% e 200% e ignora lixo', () => {
   assert.equal(clampZoom('x'), 1);
   assert.equal(clampZoom(NaN), 1);
 });
+
+test('sweep nao lanca quando a pasta de particoes esta inacessivel', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'poke-part-'));
+  const partitionsRoot = path.join(dir, 'Partitions');
+  await fs.writeFile(partitionsRoot, 'nao e pasta', 'utf8');
+  const avisos = [];
+  const res = await sweepOrphanPartitions(partitionsRoot, ['persist:slot-1'], {
+    log: (m) => avisos.push(m),
+  });
+  assert.deepEqual(res.removed, []);
+  assert.deepEqual(res.kept, []);
+  assert.deepEqual(res.failed, ['Partitions']);
+  assert.match(avisos.join('\n'), /ilegiveis/);
+  await fs.rm(dir, { recursive: true, force: true });
+});

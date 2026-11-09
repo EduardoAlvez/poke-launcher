@@ -497,25 +497,48 @@ app.whenReady().then(async () => {
   if (!singleInstance) return;
   app.setAppUserModelId(app.isPackaged ? 'dev.pokelauncher.app' : process.execPath);
   Notification.handleActivation?.(() => showWindow());
+  // A janela vem antes de qualquer trabalho de disco: uma falha de FS aqui
+  // nao pode deixar o processo vivo, sem UI e segurando o lock de instancia
+  // unica (reabrir cairia em second-instance -> showWindow() sem janela).
+  createWindow();
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    else showWindow();
+  });
+
   store = new SlotStore(path.join(app.getPath('userData'), 'slots.json'));
-  const loaded = await store.read();
-  if (loaded.source === 'defaults' && loaded.warnings.length > 0) {
-    // Nao sobrescrever um estado ilegivel: guarda o arquivo para recuperacao
-    // manual antes que o restore crie uma sessao nova por cima.
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const kept = `${store.filePath}.corrupt-${stamp}`;
-    await fs.rename(store.filePath, kept).catch(() => {});
-    console.error(`[store] slots.json ilegivel preservado em ${kept}`);
+  let stateReadable = true;
+  try {
+    const loaded = await store.read();
+    if (loaded.source === 'defaults' && loaded.warnings.length > 0) {
+      stateReadable = false;
+      // Nao sobrescrever um estado ilegivel: guarda o arquivo para recuperacao
+      // manual antes que o restore crie uma sessao nova por cima.
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const kept = `${store.filePath}.corrupt-${stamp}`;
+      await fs.rename(store.filePath, kept).catch(() => {});
+      console.error(`[store] slots.json ilegivel preservado em ${kept}`);
+    }
+    persisted = loaded.state;
+  } catch (err) {
+    stateReadable = false;
+    getLog().exception('boot:store', err);
+    console.error('[boot] estado indisponivel:', err.message);
   }
-  persisted = loaded.state;
-  if (loaded.source !== 'defaults' || loaded.warnings.length === 0) {
+  if (!persisted) persisted = defaultState();
+
+  if (stateReadable) {
     await sweepOrphanPartitions(
       path.join(app.getPath('userData'), 'Partitions'),
       persisted.slots.map((s) => s.partition)
-    );
+    ).catch((err) => {
+      getLog().exception('boot:sweep', err);
+      console.error('[boot] sweep de particoes falhou:', err.message);
+    });
   } else {
     console.error('[store] estado ilegivel: sweep de particoes adiado para nao apagar logins');
   }
+
   try {
     addonPack = await loadPack();
     automationPack = await loadAutomationPack();
@@ -528,8 +551,11 @@ app.whenReady().then(async () => {
   warmExtensionCache().catch((err) =>
     console.error('[extensions] download em segundo plano:', err.message)
   );
-  createWindow();
-  await restoreSlots();
+  await restoreSlots().catch((err) => {
+    getLog().exception('boot:restore', err);
+    console.error('[boot] restaurar sessoes falhou:', err.message);
+  });
+
   const lightWatch = setInterval(() => {
     for (const slot of registry.slots) {
       if (!slot.lightMode) continue;
@@ -537,62 +563,26 @@ app.whenReady().then(async () => {
     }
   }, 20_000);
   lightWatch.unref?.();
-  trayHandle = createTray({
-    iconPath: path.join(dirname, '../../assets/icon.png'),
-    onShow: showWindow,
-    onToggleMute: (muted) => {
-      notifier.muted = muted;
-    },
-    isMuted: notifier.muted,
-    onStopAutomation: () => {
-      automation.stopAll();
-      sendState();
-    },
-    onQuit: () => {
-      quitting = true;
-      app.quit();
-    },
-  });
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-    else showWindow();
-  });
-});
 
-app.on('web-contents-created', (_e, contents) => {
-  contents.on('will-navigate', (event, url) => {
-    if (contents === win?.webContents && !url.startsWith('file:')) {
-      event.preventDefault();
-    }
-  });
-  contents.ipc?.on('game-event', (_event, payload) => {
-    const slot = registry.findByWebContentsId(contents.id);
-    if (!slot) return;
-    const parsed = parseGameEvent(payload);
-    if (!parsed.ok) return;
-    notifier.notify(slot.id, parsed.event);
-  });
-  contents.ipc?.on('automation:status', (_event, payload) => {
-    const slot = registry.findByWebContentsId(contents.id);
-    if (!slot) return;
-    automation.reportStatus(slot.id, payload);
-    slot.automationStatus = payload;
-    sendState();
-    if (payload?.running === false && payload?.state === 'captured') {
-      automation
-        .markStopped(slot.id, 'captured')
-        .then((changed) => {
-          if (changed) sendState();
-        })
-        .catch((err) => console.error('[automation] parada pos-captura:', err.message));
-    }
-  });
-});
-
-app.on('before-quit', () => {
-  quitting = true;
-});
-
-app.on('window-all-closed', () => {
-  // app continua vivo na bandeja; a saida acontece pelo menu da bandeja
+  try {
+    trayHandle = createTray({
+      iconPath: path.join(dirname, '../../assets/icon.png'),
+      onShow: showWindow,
+      onToggleMute: (muted) => {
+        notifier.muted = muted;
+      },
+      isMuted: notifier.muted,
+      onStopAutomation: () => {
+        automation.stopAll();
+        sendState();
+      },
+      onQuit: () => {
+        quitting = true;
+        app.quit();
+      },
+    });
+  } catch (err) {
+    getLog().exception('boot:tray', err);
+    console.error('[boot] bandeja indisponivel:', err.message);
+  }
 });

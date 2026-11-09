@@ -202,8 +202,12 @@ export async function sweepOrphanPartitions(
     try {
       entries = await fs.readdir(trashRoot, { withFileTypes: true });
     } catch (err) {
-      if (err.code === 'ENOENT') return;
-      throw err;
+      if (err.code !== 'ENOENT') {
+        // Pasta travada por antivirus/Explorer nao pode derrubar o boot.
+        log(`[store] quarentena ilegivel (${err.message}); purga adiada`);
+        failed.push('quarentena');
+      }
+      return;
     }
     const maxAge = maxAgeDays * 24 * 60 * 60 * 1000;
     for (const entry of entries) {
@@ -224,8 +228,11 @@ export async function sweepOrphanPartitions(
   try {
     entries = await fs.readdir(partitionsRoot, { withFileTypes: true });
   } catch (err) {
-    if (err.code === 'ENOENT') return { removed, kept, failed };
-    throw err;
+    if (err.code !== 'ENOENT') {
+      log(`[store] particoes ilegiveis (${err.message}); sweep adiado`);
+      failed.push('Partitions');
+    }
+    return { removed, kept, failed };
   }
   const valid = new Set(validPartitions.map(partitionDirName));
   for (const entry of entries) {
