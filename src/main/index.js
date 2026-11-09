@@ -396,6 +396,8 @@ async function resetSlot(slot) {
   } catch (err) {
     console.error('[reset] reler login falhou:', err);
     sendState();
+    // Nao deixar a sessao parada em about:blank: tenta voltar ao jogo.
+    await voltar().catch((e) => console.error('[reset] voltar ao jogo falhou:', e));
     await dialog.showMessageBox(win, {
       type: 'error',
       buttons: ['OK'],
