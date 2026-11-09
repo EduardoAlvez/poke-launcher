@@ -12,6 +12,7 @@ import { AutomationController, RISK_TEXT } from './automation.js';
 import { warmExtensionCache } from './extensions.js';
 import { openLog } from './log.js';
 import { buildSlotMenu } from './slot-menu.js';
+import { canReset, RESET_DETAIL } from './reset.js';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 // Uma instancia so: o dev e o app instalado compartilham o mesmo userData, e
@@ -236,6 +237,7 @@ function wireAddonPack() {
       const slot = registry.findByWebContentsId(contents.id);
       const isMainView = slot && slot.view.webContents === contents;
       const url = contents.getURL();
+      if (!/^https?:/i.test(url)) return;
       if (injected.get(contents.id) !== url) {
         injected.set(contents.id, url);
         applyPackCss(contents, addonPack, cssKeys.get(contents.id) ?? null).then((key) => {
@@ -350,7 +352,8 @@ async function setSlotZoom(slot, factor) {
 }
 
 async function resetSlot(slot) {
-  if (slot.automation?.enabled) return { ok: false, error: 'pare a automacao antes' };
+  const permitido = canReset(registry.get(slot?.id));
+  if (!permitido.ok) return permitido;
   if (!win || win.isDestroyed()) return { ok: false, error: 'sem janela' };
   const { response } = await dialog.showMessageBox(win, {
     type: 'warning',
@@ -359,18 +362,38 @@ async function resetSlot(slot) {
     cancelId: 0,
     title: 'Reler login',
     message: `Limpar os dados de ${slot.name}?`,
-    detail: 'Cookies, armazenamento e sessao desta conta saem do launcher. As outras sessoes nao mudam.',
+    detail: RESET_DETAIL,
   });
   if (response !== 1) return { ok: false, error: 'cancelado' };
-  for (const popup of [...slot.popups]) registry.closePopup(slot, popup);
-  await session.fromPartition(`persist:${slot.id}`).clearStorageData();
-  slot.loggedIn = false;
-  if (!slot.view.webContents.isDestroyed()) {
-    slot.view.webContents.once('did-finish-load', () => refreshLoginBadge(slot));
-    slot.view.webContents.loadURL(slot.url);
+  const wc = slot.view.webContents;
+  const voltar = async () => {
+    if (wc.isDestroyed()) return;
+    wc.once('did-finish-load', () => refreshLoginBadge(slot));
+    await wc.loadURL(slot.url);
+  };
+  try {
+    for (const popup of [...slot.popups]) registry.closePopup(slot, popup);
+    // Sair da pagina antes de limpar: requisicao ou WebSocket em voo pode
+    // regravar o cookie de sessao depois do clearStorageData.
+    if (!wc.isDestroyed()) await wc.loadURL('about:blank');
+    await session.fromPartition(`persist:${slot.id}`).clearStorageData();
+    slot.loggedIn = false;
+    await voltar();
+    sendState();
+    return { ok: true };
+  } catch (err) {
+    getLog().exception('reset-slot', err);
+    sendState();
+    await dialog.showMessageBox(win, {
+      type: 'error',
+      buttons: ['OK'],
+      message: 'Nao consegui reler o login',
+      detail: `${err.message}
+
+Se o problema repetir, feche o launcher e apague a pasta Partitions\${slot.id}.`,
+    });
+    return { ok: false, error: err.message };
   }
-  sendState();
-  return { ok: true };
 }
 
 ipcMain.handle('launcher:slot-menu', (event, payload) => {
