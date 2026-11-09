@@ -15,7 +15,7 @@
       "title": "Capturou",
       "kind": "event",
       "debounceMs": 2000,
-      "excludeWithin": [".chat-msgs", ".chat-vao", ".chat-entrada"],
+      "excludeWithin": [".chat-msgs", ".chat-vao", ".chat-entrada", ".capturas-painel"],
       "matchers": [
         { "kind": "text", "regex": "captur(ou|ado|ou!|ou\\b)", "flags": "i" },
         { "kind": "text", "regex": "parab[eé]ns.*(captur|pego)", "flags": "i" }

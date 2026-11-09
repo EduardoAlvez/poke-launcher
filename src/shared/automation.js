@@ -117,11 +117,12 @@
     return Boolean(el && isVisible(el, doc));
   }
 
-  function installAutomation({ config, pack, emit, doc = root.document, win = root }) {
+  function installAutomation({ config, pack, emit, doc = root.document, win = root, now = Date.now }) {
+    const clock = typeof now === 'function' ? now : Date.now;
     let timer = null;
     let heartbeat = null;
     let throwsInWindow = 0;
-    let windowStart = Date.now();
+    let windowStart = clock();
     let total = 0;
     let ticks = 0;
     let lastTickAt = null;
@@ -160,7 +161,7 @@
       timer = null;
       if (stopped) return;
       ticks += 1;
-      lastTickAt = Date.now();
+      lastTickAt = clock();
       try {
         const now = lastTickAt;
         if (now - windowStart >= 60_000) {
@@ -188,10 +189,15 @@
         } else {
           const target = findFirst(doc, pack.clickCandidates);
           if (target) {
-            clickTarget(target, doc);
+            // So conta como arremesso o clique que de fato aconteceu: um
+            // elemento sem click() nao pode armar a janela do ate-capturar.
+            if (!clickTarget(target, doc)) {
+              report('waiting-button');
+              return;
+            }
             throwsInWindow += 1;
             total += 1;
-            lastThrowAt = Date.now();
+            lastThrowAt = clock();
             report('clicking');
           } else {
             report('waiting-button');
@@ -235,7 +241,7 @@
       if (stopped || config.mode !== 'until-catch' || !pack?.stopOnRule) return false;
       if (ruleId !== pack.stopOnRule) return false;
       const windowMs = Math.max(1000, config.captureWindowMs ?? 20_000);
-      if (lastThrowAt === null || Date.now() - lastThrowAt > windowMs) return false;
+      if (lastThrowAt === null || clock() - lastThrowAt > windowMs) return false;
       stop('captured');
       return true;
     };

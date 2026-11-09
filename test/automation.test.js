@@ -429,3 +429,68 @@ test('until-catch nao para com evento de captura atrasado', async () => {
   assert.equal(handle.onRule('pokemon-caught'), false, 'nunca arremessou: nao ha captura nossa');
   handle.stop();
 });
+
+test('alvo sem click() nao conta como arremesso nem arma o ate-capturar', async () => {
+  const doc = {
+    body: { textContent: '' },
+    defaultView: null,
+    querySelector: (selector) => (selector === '.caido' ? { textContent: '', hidden: false } : null),
+  };
+  const win = {
+    crypto: { getRandomValues: (arr) => { arr[0] = 1; return arr; } },
+    setTimeout: (fn, ms) => setTimeout(fn, ms),
+    clearTimeout: (id) => clearTimeout(id),
+  };
+  const estados = [];
+  const handle = installAutomation({
+    config: { enabled: true, mode: 'until-catch', intervalMs: 500, jitterMs: 0, maxPerMin: 60 },
+    pack: { clickCandidates: ['.caido'], pauseSelectors: [], pauseText: [], stopOnRule: 'pokemon-caught' },
+    emit: (evt) => estados.push(evt.state),
+    doc,
+    win,
+  });
+  await new Promise((r) => setTimeout(r, 700));
+  assert.equal(handle.getTotal(), 0, 'clique que nao aconteceu nao conta');
+  assert.ok(estados.includes('waiting-button'));
+  assert.equal(handle.onRule('pokemon-caught'), false, 'sem arremesso real a captura nao para');
+  handle.stop();
+});
+
+test('janela do ate-capturar expira em 20 s (19 s ainda para, 21 s nao)', async () => {
+  let agora = 1_000_000;
+  const criar = () => {
+    const doc = {
+      body: { textContent: '' },
+      defaultView: null,
+      querySelector: (selector) => (selector === '.caido' ? { textContent: '', hidden: false, click: () => {} } : null),
+    };
+    const win = {
+      crypto: { getRandomValues: (arr) => { arr[0] = 1; return arr; } },
+      setTimeout: (fn, ms) => setTimeout(fn, ms),
+      clearTimeout: (id) => clearTimeout(id),
+    };
+    return installAutomation({
+      config: { enabled: true, mode: 'until-catch', intervalMs: 500, jitterMs: 0, maxPerMin: 60 },
+      pack: { clickCandidates: ['.caido'], pauseSelectors: [], pauseText: [], stopOnRule: 'pokemon-caught' },
+      emit: () => {},
+      doc,
+      win,
+      now: () => agora,
+    });
+  };
+
+  const dentro = criar();
+  await new Promise((r) => setTimeout(r, 700));
+  assert.ok(dentro.getTotal() > 0, 'arremessou');
+  agora += 19_000;
+  assert.equal(dentro.onRule('pokemon-caught'), true, '19 s depois do arremesso ainda e captura nossa');
+  dentro.stop();
+
+  agora = 2_000_000;
+  const fora = criar();
+  await new Promise((r) => setTimeout(r, 700));
+  agora += 21_000;
+  assert.equal(fora.onRule('pokemon-caught'), false, '21 s depois ja nao e');
+  assert.equal(fora.isRunning(), true);
+  fora.stop();
+});

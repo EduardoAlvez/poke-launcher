@@ -90,3 +90,12 @@ test('applyPackCss troca a chave do CSS em vez de empilhar copias', async () => 
   assert.deepEqual(calls, ['insert', 'remove:k1', 'insert']);
   assert.equal(await applyPackCss(wc, { css: [] }), null, 'pack sem CSS nao insere nada');
 });
+
+test('regra de captura ignora o painel de capturas e o chat', async () => {
+  const pack = JSON.parse(await readFile(path.join(here, '../src/main/rules/pokeidle.json'), 'utf8'));
+  const regra = pack.rules.find((r) => r.id === 'pokemon-caught');
+  assert.ok(regra, 'a regra existe');
+  for (const seletor of ['.chat-msgs', '.chat-vao', '.chat-entrada', '.capturas-painel']) {
+    assert.ok(regra.excludeWithin.includes(seletor), `exclui ${seletor}`);
+  }
+});
