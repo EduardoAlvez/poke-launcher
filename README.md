@@ -97,8 +97,8 @@ npm run dist     # gera instalador (Windows: NSIS; Linux: deb)
 ## Dados e privacidade
 
 Tudo é local. O estado fica em `app.getPath('userData')` (`slots.json` + backup `.bak`), os cookies
-ficam nas partições do Chromium e a extensão é extraída em `userData/extensions`. Erros ficam em
-`launcher.log` na mesma pasta (rotacionado em 1 MB). Nenhum dado é enviado para servidores do launcher.
+ficam nas partições do Chromium e a extensão é extraída em `userData/extensions`. O diagnóstico fica em
+`launcher.log` na mesma pasta (rotacionado em 1 MB), inclusive os avisos do processo principal. Nenhum dado é enviado para servidores do launcher.
 
 ## Estrutura
 

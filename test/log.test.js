@@ -32,3 +32,15 @@ test('log nao lanca quando nao consegue gravar', async () => {
   assert.doesNotThrow(() => log.exception('falha', new Error('teste')));
   await fsp.rm(dir, { recursive: true, force: true });
 });
+
+test('formatArgs achata console.* em uma linha com stack', async () => {
+  const { formatArgs } = await import('../src/main/log.js');
+  const err = new Error('quebrou');
+  assert.match(formatArgs(['[x]', 42, { a: 1 }, true]), /^\[x\] 42 \{"a":1\} true$/);
+  assert.match(formatArgs([err]), /Error: quebrou/);
+  assert.match(formatArgs([err]), /\n\s+at /);
+  const circular = {};
+  circular.self = circular;
+  assert.equal(typeof formatArgs([circular]), 'string');
+  assert.equal(formatArgs([]), '');
+});

@@ -10,7 +10,7 @@ import { loadPack, buildAddonPreload, applyPackCss, sendPackRules, loadAutomatio
 import { LIGHT_SAMPLE_SCENE } from './light.js';
 import { AutomationController, RISK_TEXT } from './automation.js';
 import { warmExtensionCache } from './extensions.js';
-import { openLog } from './log.js';
+import { openLog, formatArgs } from './log.js';
 import { buildSlotMenu } from './slot-menu.js';
 import { canReset, RESET_DETAIL } from './reset.js';
 
@@ -23,18 +23,30 @@ function getLog() {
   if (!appLog) appLog = openLog(path.join(app.getPath('userData'), 'launcher.log'));
   return appLog;
 }
-// Um erro async nao pode sumir sem rastro (e nem derrubar o launcher): fica
-// no launcher.log para suporte.
+
+// No build empacotado o stdout e descartado: espelha o diagnostico do main no
+// arquivo para o log nao ficar so com stack trace de excecao.
+const fileLog = getLog();
+for (const level of ['error', 'warn']) {
+  const original = console[level].bind(console);
+  console[level] = (...args) => {
+    fileLog[level](formatArgs(args));
+    original(...args);
+  };
+}
+fileLog.info(
+  `iniciando v${app.getVersion()} (${app.isPackaged ? 'empacotado' : 'dev'}) em ${app.getPath('userData')}`
+);
+
+// Um erro async nao pode sumir sem rastro (e nem derrubar o launcher).
 process.on('uncaughtException', (err) => {
-  getLog().exception('uncaughtException', err);
   console.error('[app] excecao nao tratada:', err);
 });
 process.on('unhandledRejection', (reason) => {
-  getLog().exception('unhandledRejection', reason);
   console.error('[app] promessa rejeitada sem tratamento:', reason);
 });
 app.on('child-process-gone', (_event, details) => {
-  getLog().error(`child-process-gone: ${JSON.stringify(details)}`);
+  console.error('child-process-gone:', details);
 });
 
 const singleInstance = app.requestSingleInstanceLock();
@@ -382,7 +394,7 @@ async function resetSlot(slot) {
     sendState();
     return { ok: true };
   } catch (err) {
-    getLog().exception('reset-slot', err);
+    console.error('[reset] reler login falhou:', err);
     sendState();
     await dialog.showMessageBox(win, {
       type: 'error',
@@ -545,8 +557,7 @@ app.whenReady().then(async () => {
     persisted = loaded.state;
   } catch (err) {
     stateReadable = false;
-    getLog().exception('boot:store', err);
-    console.error('[boot] estado indisponivel:', err.message);
+    console.error('[boot] estado indisponivel:', err);
   }
   if (!persisted) persisted = defaultState();
 
@@ -554,10 +565,7 @@ app.whenReady().then(async () => {
     await sweepOrphanPartitions(
       path.join(app.getPath('userData'), 'Partitions'),
       persisted.slots.map((s) => s.partition)
-    ).catch((err) => {
-      getLog().exception('boot:sweep', err);
-      console.error('[boot] sweep de particoes falhou:', err.message);
-    });
+    ).catch((err) => console.error('[boot] sweep de particoes falhou:', err));
   } else {
     console.error('[store] estado ilegivel: sweep de particoes adiado para nao apagar logins');
   }
@@ -574,10 +582,7 @@ app.whenReady().then(async () => {
   warmExtensionCache().catch((err) =>
     console.error('[extensions] download em segundo plano:', err.message)
   );
-  await restoreSlots().catch((err) => {
-    getLog().exception('boot:restore', err);
-    console.error('[boot] restaurar sessoes falhou:', err.message);
-  });
+  await restoreSlots().catch((err) => console.error('[boot] restaurar sessoes falhou:', err));
 
   const lightWatch = setInterval(() => {
     for (const slot of registry.slots) {
@@ -605,7 +610,6 @@ app.whenReady().then(async () => {
       },
     });
   } catch (err) {
-    getLog().exception('boot:tray', err);
-    console.error('[boot] bandeja indisponivel:', err.message);
+    console.error('[boot] bandeja indisponivel:', err);
   }
 });

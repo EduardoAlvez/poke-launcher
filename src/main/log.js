@@ -44,7 +44,26 @@ export function openLog(filePath, { maxBytes = 1_000_000, now = () => new Date()
   return {
     file: filePath,
     info: (message) => write('info', message),
+    warn: (message) => write('warn', message),
     error: (message) => write('error', message),
     exception: (label, err) => write('error', `${label}: ${err?.stack ?? err}`),
   };
+}
+
+/** Achata os argumentos de console.* numa linha (Error vira stack). */
+export function formatArgs(args) {
+  return (args ?? [])
+    .map((arg) => {
+      if (typeof arg === 'string') return arg;
+      if (arg instanceof Error) return arg.stack ?? String(arg);
+      if (arg && typeof arg === 'object') {
+        try {
+          return JSON.stringify(arg);
+        } catch {
+          return String(arg);
+        }
+      }
+      return String(arg);
+    })
+    .join(' ');
 }
