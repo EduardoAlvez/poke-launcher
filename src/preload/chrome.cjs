@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('launcher', {
   setLayout: (cols) => ipcRenderer.invoke('launcher:set-layout', { cols }),
   setLightMode: (id, on) => ipcRenderer.invoke('launcher:set-light', { id, on: on === true }),
   focusSlot: (id) => ipcRenderer.send('launcher:focus-slot', { id }),
+  slotMenu: (id) => ipcRenderer.invoke('launcher:slot-menu', { id }),
   closePopups: () => ipcRenderer.invoke('launcher:close-popups'),
   runDiagnostics: () => ipcRenderer.invoke('diagnostics:collect'),
   setViewsVisible: (visible) => ipcRenderer.send('launcher:views-visible', visible === true),
@@ -14,4 +15,5 @@ contextBridge.exposeInMainWorld('launcher', {
   stopAllAutomation: () => ipcRenderer.invoke('automation:stop-all'),
   riskText: () => ipcRenderer.invoke('automation:risk-text'),
   onState: (cb) => ipcRenderer.on('launcher:state', (_e, slots) => cb(slots)),
+  onRenameRequest: (cb) => ipcRenderer.on('launcher:rename-request', (_e, payload) => cb(payload ?? {})),
 });

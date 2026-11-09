@@ -81,6 +81,15 @@ button:hover { border-color: var(--accent); }
 .chip .light:hover { color: var(--accent); border-color: var(--accent); }
 .chip .light.on { color: #7cc7ff; border-color: #7cc7ff; }
 .chip .light.error { color: #ff6b6b; border-color: #ff6b6b; }
+.chip .tag {
+  font-size: 10px; letter-spacing: .4px; color: #ffb454;
+  border: 1px solid #4a3a20; border-radius: 4px; padding: 0 4px;
+}
+.chip input.rename {
+  background: #0f1218; color: var(--fg); border: 1px solid var(--accent);
+  border-radius: 4px; padding: 1px 5px; font: inherit; font-size: 12px;
+  width: 9em; outline: none;
+}
 button.danger { color: #ff6b6b; border-color: #4a2a2f; }
 button.danger:hover { border-color: #ff6b6b; }
 .muted { color: var(--muted); font-size: 11px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -10,6 +10,7 @@ import {
   defaultState,
   SlotStore,
   sweepOrphanPartitions,
+  clampZoom,
   SCHEMA_VERSION,
 } from '../src/main/store.js';
 
@@ -188,4 +189,13 @@ test('buildSnapshot persiste a automacao do slot vivo, nao a anterior', async ()
   assert.equal(snap.slots[0].automation.enabled, false);
   assert.equal(snap.slots[0].automation.intervalMs, 3000);
   assert.equal(snap.slots[0].partition, 'persist:slot-1');
+});
+
+test('clampZoom prende entre 50% e 200% e ignora lixo', () => {
+  assert.equal(clampZoom(1.5), 1.5);
+  assert.equal(clampZoom(0.1), 0.5);
+  assert.equal(clampZoom(9), 2);
+  assert.equal(clampZoom(1.333), 1.33);
+  assert.equal(clampZoom('x'), 1);
+  assert.equal(clampZoom(NaN), 1);
 });

@@ -19,7 +19,9 @@ Baixe o instalador na página de releases:
 ## Recursos
 
 - **Sessões isoladas**: até 8 contas lado a lado, cada uma com cookies/armazenamento próprios
-  (`persist:slot-N`). Adicionar e remover pela toolbar.
+  (`persist:slot-N`). Adicionar e remover pela toolbar, renomear com duplo clique no nome.
+- **Menu do chip** (clique direito): silenciar a sessão, zoom de 75% a 150% e **reler login**
+  (limpa cookies e armazenamento só daquela conta; as outras sessões não mudam).
 - **Grade ajustável**: 1, 2 ou 3 colunas (o padrão é 2).
 - **Bandeja**: fecha para a bandeja com `X`; menu com Abrir, Silenciar, Parar automações e Encerrar.
 - **Notificações nativas** por evento do jogo (captura, poucas bolas, boss, ovo), com cooldown,

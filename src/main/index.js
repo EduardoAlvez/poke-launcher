@@ -1,9 +1,9 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { app, BrowserWindow, ipcMain, Notification, session } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, session } from 'electron';
 import { SlotRegistry } from './slots.js';
-import { SlotStore, sweepOrphanPartitions, defaultState, buildSnapshot } from './store.js';
+import { SlotStore, sweepOrphanPartitions, defaultState, buildSnapshot, clampZoom } from './store.js';
 import { Notifier, parseGameEvent } from './notifications.js';
 import { createTray } from './tray.js';
 import { loadPack, buildAddonPreload, applyPackCss, sendPackRules, loadAutomationPack, auditPack, collectSelectors } from './addons.js';
@@ -11,6 +11,7 @@ import { LIGHT_SAMPLE_SCENE } from './light.js';
 import { AutomationController, RISK_TEXT } from './automation.js';
 import { warmExtensionCache } from './extensions.js';
 import { openLog } from './log.js';
+import { buildSlotMenu } from './slot-menu.js';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 // Uma instancia so: o dev e o app instalado compartilham o mesmo userData, e
@@ -128,6 +129,8 @@ function pushState() {
       lightMode: s.lightMode === true,
       lightApplied: s.lightApplied === true,
       lightFailed: s.lightFailed === true,
+      muted: s.muted === true,
+      zoomFactor: s.zoomFactor ?? 1,
       automation: {
         enabled: s.automation?.enabled === true,
         exitEconomy: s.automation?.exitEconomy !== false,
@@ -280,6 +283,7 @@ async function restoreSlots() {
         created.muted = slot.muted;
         created.zoomFactor = slot.zoomFactor;
         created.lightMode = slot.lightMode === true;
+        registry.applySlotPrefs(created);
         if (slot.automation) {
           created.automation = { ...slot.automation, enabled: false };
         }
@@ -328,6 +332,60 @@ ipcMain.handle('launcher:rename-slot', async (event, payload) => {
   slot.name = String(payload?.name ?? slot.name).slice(0, 24) || slot.id;
   await persist();
   sendState();
+  return true;
+});
+
+async function setSlotMuted(slot, muted) {
+  slot.muted = muted === true;
+  registry.applySlotPrefs(slot);
+  await persist();
+  sendState();
+}
+
+async function setSlotZoom(slot, factor) {
+  slot.zoomFactor = clampZoom(factor, { min: 0.5, max: 2 });
+  registry.applySlotPrefs(slot);
+  await persist();
+  sendState();
+}
+
+async function resetSlot(slot) {
+  if (slot.automation?.enabled) return { ok: false, error: 'pare a automacao antes' };
+  if (!win || win.isDestroyed()) return { ok: false, error: 'sem janela' };
+  const { response } = await dialog.showMessageBox(win, {
+    type: 'warning',
+    buttons: ['Cancelar', 'Limpar e recarregar'],
+    defaultId: 0,
+    cancelId: 0,
+    title: 'Reler login',
+    message: `Limpar os dados de ${slot.name}?`,
+    detail: 'Cookies, armazenamento e sessao desta conta saem do launcher. As outras sessoes nao mudam.',
+  });
+  if (response !== 1) return { ok: false, error: 'cancelado' };
+  for (const popup of [...slot.popups]) registry.closePopup(slot, popup);
+  await session.fromPartition(`persist:${slot.id}`).clearStorageData();
+  slot.loggedIn = false;
+  if (!slot.view.webContents.isDestroyed()) {
+    slot.view.webContents.once('did-finish-load', () => refreshLoginBadge(slot));
+    slot.view.webContents.loadURL(slot.url);
+  }
+  sendState();
+  return { ok: true };
+}
+
+ipcMain.handle('launcher:slot-menu', (event, payload) => {
+  if (!isChrome(event.sender)) return false;
+  const slot = registry.get(payload?.id);
+  if (!slot || !win || win.isDestroyed()) return false;
+  const menu = Menu.buildFromTemplate(
+    buildSlotMenu(slot, {
+      onMute: (muted) => setSlotMuted(slot, muted),
+      onZoom: (factor) => setSlotZoom(slot, factor),
+      onRename: () => win.webContents.send('launcher:rename-request', { id: slot.id }),
+      onReset: () => resetSlot(slot),
+    })
+  );
+  menu.popup({ window: win });
   return true;
 });
 

@@ -5,6 +5,8 @@ import { registerAddonPreload } from './addons.js';
 import { LightMode } from './light-mode.js';
 
 const DEFAULT_URL = 'https://pokeidle.io/app';
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 2;
 const MAX_SLOTS = 8;
 
 function makeView(partitionId) {
@@ -35,6 +37,19 @@ export class SlotRegistry {
 
   attachWindow(win) {
     this.win = win;
+  }
+
+  /**
+   * Mudo e zoom moram no slot (slots.json) mas quem obedece e o webContents:
+   * isto e chamado ao criar, ao restaurar e quando o usuario muda no menu.
+   */
+  applySlotPrefs(slot) {
+    const wc = slot?.view?.webContents;
+    if (!wc || wc.isDestroyed()) return;
+    wc.setAudioMuted(slot.muted === true);
+    const zoom = Number(slot.zoomFactor);
+    const factor = Number.isFinite(zoom) ? Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom)) : 1;
+    wc.setZoomFactor(factor);
   }
 
   setAddonPreloadPath(preloadPath) {
@@ -192,12 +207,16 @@ export class SlotRegistry {
     if (!dead.webContents.isDestroyed()) dead.webContents.close();
     const fresh = makeView(slot.id);
     slot.view = fresh;
+    this.applySlotPrefs(slot);
     slot.lightApplied = false;
     slot.lightCssKey = null;
     slot.lightGen += 1;
     slot.lightReloadAt = 0;
     fresh.webContents.on('render-process-gone', () => this.recreate(slot));
-    fresh.webContents.on('did-finish-load', () => this.lightMode.sync(slot));
+    fresh.webContents.on('did-finish-load', () => {
+      this.applySlotPrefs(slot);
+      this.lightMode.sync(slot);
+    });
     this.bindOpenHandler(slot, fresh);
     this.win.contentView.addChildView(fresh);
     fresh.webContents.loadURL(slot.url);

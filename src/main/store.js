@@ -18,6 +18,11 @@ function isHttpUrl(value) {
   }
 }
 
+export function clampZoom(value, { min = 0.5, max = 2, fallback = 1 } = {}) {
+  const n = typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+  return Math.round(Math.min(max, Math.max(min, n)) * 100) / 100;
+}
+
 function isRatio(value) {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
 }

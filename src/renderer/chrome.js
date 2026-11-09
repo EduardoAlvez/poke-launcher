@@ -205,6 +205,10 @@ function createChip() {
   chip.appendChild(dot);
   const label = document.createElement('span');
   chip.appendChild(label);
+  const tag = document.createElement('span');
+  tag.className = 'tag';
+  tag.hidden = true;
+  chip.appendChild(tag);
   const light = document.createElement('button');
   light.type = 'button';
   light.textContent = 'LEVE';
@@ -220,8 +224,54 @@ function createChip() {
   x.setAttribute('role', 'button');
   x.tabIndex = 0;
   chip.appendChild(x);
-  const view = { chip, dot, label, light, auto, slot: null };
+  const view = { chip, dot, label, tag, light, auto, slot: null, rename: null };
   chip.addEventListener('click', () => view.slot && window.launcher.focusSlot(view.slot.id));
+  chip.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    if (view.slot) window.launcher.slotMenu(view.slot.id);
+  });
+  view.rename = () => {
+    if (!view.slot || label.tagName === 'INPUT') return;
+    const original = view.slot.name;
+    const input = document.createElement('input');
+    input.className = 'rename';
+    input.value = original;
+    input.maxLength = 24;
+    input.spellcheck = false;
+    chip.replaceChild(input, label);
+    input.focus();
+    input.select();
+    let done = false;
+    const fim = async (salvar) => {
+      if (done) return;
+      done = true;
+      const nome = input.value.trim().slice(0, 24);
+      chip.replaceChild(label, input);
+      label.textContent = original;
+      if (salvar && nome && nome !== original) {
+        await window.launcher.renameSlot(view.slot.id, nome).catch(() => {});
+      }
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        fim(true);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        fim(false);
+      }
+    });
+    for (const tipo of ['click', 'dblclick', 'mousedown']) {
+      input.addEventListener(tipo, (e) => e.stopPropagation());
+    }
+    input.addEventListener('blur', () => fim(true));
+  };
+  label.addEventListener('dblclick', (e) => {
+    e.stopPropagation();
+    view.rename();
+  });
   const fechar = () => {
     if (!view.slot) return;
     const ok = window.confirm(
@@ -267,6 +317,10 @@ function updateChip(view, s) {
       ? 'Sessao com login ativo'
       : 'Sem login';
   view.label.textContent = crashIn > 0 ? `${s.name} — caiu, voltando` : s.name;
+  view.label.title = 'Duplo clique para renomear';
+  view.tag.hidden = s.muted !== true;
+  view.tag.textContent = s.muted === true ? 'MUDO' : '';
+  view.tag.title = s.muted === true ? 'Som desta sessao silenciado' : '';
   const light = s.lightMode === true;
   const failed = view.lightError || s.lightFailed === true;
   view.light.className = `light${light ? ' on' : ''}${failed ? ' error' : ''}`;
@@ -282,6 +336,8 @@ function updateChip(view, s) {
   view.auto.dataset.stalled = age !== null && age > 20000 ? 'true' : 'false';
   view.auto.title = autoTitle(s);
 }
+
+window.launcher.onRenameRequest(({ id }) => chipViews.get(id)?.rename?.());
 
 window.launcher.onState((slots) => {
   const ids = new Set(slots.map((s) => s.id));
