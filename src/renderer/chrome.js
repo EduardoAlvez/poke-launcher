@@ -21,6 +21,7 @@ const diagBtn = document.getElementById('diagnostics');
 const diagStatus = document.getElementById('diag-status');
 let editingSlot = null;
 let riskReady = false;
+let lastSlots = [];
 
 modalSave.disabled = true;
 window.launcher
@@ -39,7 +40,8 @@ window.launcher
 
 document.getElementById('modal-cancel').addEventListener('click', closeModal);
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !modal.hidden) closeModal();
+  if (e.key === 'Escape' && !scriptsModal.hidden) closeScriptsModal();
+  else if (e.key === 'Escape' && !modal.hidden) closeModal();
   else if (e.key === 'Escape' && !closePopupsBtn.hidden) window.launcher.closePopups();
 });
 modal.addEventListener('click', (e) => {
@@ -340,6 +342,7 @@ function updateChip(view, s) {
 window.launcher.onRenameRequest(({ id }) => chipViews.get(id)?.rename?.());
 
 window.launcher.onState((slots) => {
+  lastSlots = slots;
   const ids = new Set(slots.map((s) => s.id));
   for (const [id, view] of chipViews) {
     if (ids.has(id)) continue;
@@ -376,3 +379,238 @@ const hint = document.createElement('span');
 hint.className = 'empty-hint';
 hint.textContent = 'Carregando…';
 chips.appendChild(hint);
+
+const scriptsModal = document.getElementById('scripts-modal');
+const scriptsBtn = document.getElementById('scripts-btn');
+const scriptsList = document.getElementById('scripts-list');
+const scriptsWarn = document.getElementById('scripts-warn');
+const scriptName = document.getElementById('script-name');
+const scriptMode = document.getElementById('script-mode');
+const scriptSlots = document.getElementById('script-slots');
+const scriptEnabled = document.getElementById('script-enabled');
+const scriptCode = document.getElementById('script-code');
+const scriptError = document.getElementById('script-error');
+const scriptSave = document.getElementById('script-save');
+const scriptNew = document.getElementById('script-new');
+const scriptRunNow = document.getElementById('script-run-now');
+const scriptsClose = document.getElementById('scripts-close');
+let allScripts = [];
+let scriptWarnings = [];
+let editingScriptId = null;
+
+function scopeLabel(script) {
+  if (script.scope?.mode === 'slots') {
+    const n = Array.isArray(script.scope.slotIds) ? script.scope.slotIds.length : 0;
+    return n === 1 ? '1 sessão' : `${n} sessões`;
+  }
+  return 'Todas as sessões';
+}
+
+function showScriptMsg(msg, isError) {
+  scriptError.textContent = msg;
+  scriptError.title = msg;
+  scriptError.style.color = isError ? '#ff6b6b' : '#3fbf7f';
+}
+
+function renderScriptSlots(selected) {
+  const ids = Array.isArray(selected) ? selected : [];
+  scriptSlots.textContent = '';
+  if (!lastSlots.length) {
+    const span = document.createElement('span');
+    span.className = 'muted';
+    span.textContent = 'Nenhuma sessão aberta.';
+    scriptSlots.appendChild(span);
+    return;
+  }
+  for (const s of lastSlots) {
+    const label = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = s.id;
+    cb.checked = ids.includes(s.id);
+    const span = document.createElement('span');
+    span.textContent = s.name;
+    label.appendChild(cb);
+    label.appendChild(span);
+    scriptSlots.appendChild(label);
+  }
+}
+
+function renderScriptsList() {
+  scriptsList.textContent = '';
+  for (const script of allScripts) {
+    const row = document.createElement('div');
+    row.className = 'script-row';
+    const info = document.createElement('div');
+    info.className = 'script-info';
+    const name = document.createElement('div');
+    name.className = 'script-name';
+    name.textContent = `${script.enabled ? '' : '(off) '}${script.name}`;
+    const scope = document.createElement('div');
+    scope.className = 'script-scope';
+    scope.textContent = scopeLabel(script);
+    info.appendChild(name);
+    info.appendChild(scope);
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.textContent = 'Editar';
+    edit.addEventListener('click', () => startEditScript(script.id));
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'danger';
+    del.textContent = 'Excluir';
+    del.addEventListener('click', () => deleteScript(script));
+    row.appendChild(info);
+    row.appendChild(edit);
+    row.appendChild(del);
+    scriptsList.appendChild(row);
+  }
+}
+
+function renderScriptWarnings() {
+  scriptsWarn.hidden = scriptWarnings.length === 0;
+  scriptsWarn.textContent = scriptWarnings.length ? `Avisos ao carregar: ${scriptWarnings.join('; ')}` : '';
+}
+
+function resetScriptForm() {
+  editingScriptId = null;
+  scriptName.value = '';
+  scriptMode.value = 'all';
+  scriptEnabled.checked = true;
+  scriptCode.value = '';
+  scriptSlots.hidden = true;
+  showScriptMsg('', false);
+  renderScriptSlots([]);
+}
+
+function startEditScript(id) {
+  const script = allScripts.find((s) => s.id === id);
+  if (!script) return;
+  editingScriptId = id;
+  scriptName.value = script.name;
+  scriptMode.value = script.scope?.mode === 'slots' ? 'slots' : 'all';
+  scriptEnabled.checked = script.enabled === true;
+  scriptCode.value = script.code ?? '';
+  scriptSlots.hidden = scriptMode.value !== 'slots';
+  showScriptMsg('', false);
+  renderScriptSlots(script.scope?.slotIds ?? []);
+  scriptName.focus();
+}
+
+function closeScriptsModal() {
+  scriptsModal.hidden = true;
+  window.launcher.setViewsVisible(true);
+  scriptsBtn.focus();
+}
+
+async function refreshScripts() {
+  try {
+    const res = await window.launcher.scripts();
+    allScripts = Array.isArray(res) ? res : (res?.scripts ?? []);
+    scriptWarnings = Array.isArray(res?.warnings) ? res.warnings : [];
+  } catch (err) {
+    allScripts = [];
+    scriptWarnings = [];
+    showScriptMsg(err?.message ?? 'Falha ao carregar scripts', true);
+    throw err;
+  }
+  renderScriptsList();
+  renderScriptWarnings();
+}
+
+async function openScriptsModal() {
+  scriptsModal.hidden = false;
+  window.launcher.setViewsVisible(false);
+  resetScriptForm();
+  try {
+    await refreshScripts();
+  } catch {
+    /* a mensagem ja foi exibida no formulario */
+  }
+  scriptName.focus();
+}
+
+async function deleteScript(script) {
+  if (!window.confirm(`Excluir o script "${script.name}"?`)) return;
+  try {
+    const res = await window.launcher.deleteScript(script.id);
+    if (!res?.ok) {
+      showScriptMsg(res?.error || 'Falha ao excluir', true);
+      return;
+    }
+    if (editingScriptId === script.id) resetScriptForm();
+    await refreshScripts();
+  } catch (err) {
+    showScriptMsg(err?.message ?? 'Falha ao excluir', true);
+  }
+}
+
+scriptMode.addEventListener('change', () => {
+  scriptSlots.hidden = scriptMode.value !== 'slots';
+});
+
+scriptNew.addEventListener('click', () => resetScriptForm());
+scriptsBtn.addEventListener('click', openScriptsModal);
+scriptsClose.addEventListener('click', closeScriptsModal);
+scriptsModal.addEventListener('click', (e) => {
+  if (e.target === scriptsModal) closeScriptsModal();
+});
+
+scriptSave.addEventListener('click', async () => {
+  const name = scriptName.value.trim();
+  if (!name) {
+    showScriptMsg('Dê um nome ao script', true);
+    return;
+  }
+  const mode = scriptMode.value === 'slots' ? 'slots' : 'all';
+  const slotIds = mode === 'slots'
+    ? Array.from(scriptSlots.querySelectorAll('input[type="checkbox"]:checked')).map((cb) => cb.value)
+    : [];
+  if (mode === 'slots' && slotIds.length === 0) {
+    showScriptMsg('Selecione ao menos uma sessão', true);
+    return;
+  }
+  scriptSave.disabled = true;
+  try {
+    const res = await window.launcher.saveScript({
+      id: editingScriptId ?? '',
+      name,
+      code: scriptCode.value,
+      enabled: scriptEnabled.checked,
+      scope: { mode, slotIds },
+    });
+    if (!res?.ok) {
+      showScriptMsg(res?.error || 'Falha ao salvar', true);
+      return;
+    }
+    await refreshScripts();
+    resetScriptForm();
+    showScriptMsg('Script salvo.', false);
+  } catch (err) {
+    showScriptMsg(err?.message ?? 'Falha ao salvar', true);
+  } finally {
+    scriptSave.disabled = false;
+  }
+});
+
+scriptRunNow.addEventListener('click', async () => {
+  scriptRunNow.disabled = true;
+  try {
+    const res = await window.launcher.runScripts();
+    if (res?.ok) {
+      if (!res.executions && !res.failures) {
+        showScriptMsg('Nenhum script ativo se aplica às sessões abertas.', false);
+      } else {
+        const parts = [`${res.executions ?? 0} execução(ões) em ${res.sessions ?? 0} sessão(ões)`];
+        if (res.failures) parts.push(`${res.failures} falha(s)`);
+        showScriptMsg(parts.join(' — '), res.failures > 0);
+      }
+    } else {
+      showScriptMsg(res?.error || 'Falha ao rodar', true);
+    }
+  } catch (err) {
+    showScriptMsg(err?.message ?? 'Falha ao rodar', true);
+  } finally {
+    scriptRunNow.disabled = false;
+  }
+});

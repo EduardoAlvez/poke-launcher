@@ -3,6 +3,8 @@ import { computeGrid, popupBounds, TOOLBAR_H } from './layout.js';
 import { installSlotExtensions } from './extensions.js';
 import { registerAddonPreload } from './addons.js';
 import { LightMode } from './light-mode.js';
+import { ECO_INSTALL, ecoSetExpr } from './eco.js';
+import { hostAllowed, withTimeout, INJECT_TIMEOUT_MS } from './scripts.js';
 
 const DEFAULT_URL = 'https://pokeidle.io/app';
 const MIN_ZOOM = 0.5;
@@ -31,6 +33,7 @@ export class SlotRegistry {
     this.onPopupChange = null;
     this.onLightChange = null;
     this.onCrash = null;
+    this.scriptRunner = null;
     this.disposed = false;
     this.lightMode = new LightMode({ onChange: (slot) => this.onLightChange?.(slot) });
   }
@@ -56,6 +59,59 @@ export class SlotRegistry {
     this.addonPreloadPath = preloadPath;
   }
 
+  /**
+   * Aplica o modo eco no documento atual. O patch e instalado primeiro; se a
+   * pagina ainda nao o tem (early return do install), o SET seguinte e no-op e
+   * o valor inicial volta a ser aplicado no proximo carregamento.
+   */
+  async applyEcoPrefs(slot, wc = slot?.view?.webContents) {
+    if (!wc || wc.isDestroyed() || !hostAllowed(wc.getURL?.() ?? '', slot?.url)) return false;
+    try {
+      await withTimeout(
+        wc.executeJavaScript(`${ECO_INSTALL}; ${ecoSetExpr(slot.eco === true)}`, true),
+        INJECT_TIMEOUT_MS,
+        'eco'
+      );
+      return true;
+    } catch (err) {
+      console.error(`[${slot?.id ?? '?'}] modo eco:`, err?.message ?? err);
+      return false;
+    }
+  }
+
+  /**
+   * A `view` de um slot pode ser recriada (crash) ou a pagina pode navegar no
+   * meio de um `await`: sem essa checagem o script/leve agiria na view errada.
+   */
+  alive(slot, wc = null, gen = null) {
+    if (this.disposed || slot.removed || !this.slots.includes(slot)) return false;
+    if (wc && slot.view.webContents !== wc) return false;
+    if (gen !== null && slot.loadGen !== gen) return false;
+    return true;
+  }
+
+  /**
+   * Ordem: eco → scripts → leve. O eco vem primeiro para ser a base do rAF; os
+   * scripts vêm antes do leve porque um script pode embrulhar o rAF — se o leve
+   * estivesse por baixo, desligá-lo não conseguiria mais restaurar o original.
+   * O custo é o leve esperar os scripts; cada script tem timeout, então um
+   * script travado atrasa o remédio de CPU no máximo alguns segundos.
+   */
+  async afterLoad(slot) {
+    if (!this.alive(slot)) return;
+    const wc = slot.view.webContents;
+    const gen = (slot.loadGen = (slot.loadGen ?? 0) + 1);
+    await this.applyEcoPrefs(slot, wc);
+    if (!this.alive(slot, wc, gen)) return;
+    try {
+      await this.scriptRunner?.(slot, wc);
+    } catch (err) {
+      console.error(`[${slot.id}] scripts:`, err?.message ?? err);
+    }
+    if (!this.alive(slot, wc, gen)) return;
+    this.lightMode.sync(slot).catch((err) => console.error(`[${slot.id}] modo leve:`, err?.message ?? err));
+  }
+
   async add(name, url = DEFAULT_URL, { id, maxSlots = MAX_SLOTS } = {}) {
     if (this.slots.length >= maxSlots) throw new Error(`Limite de ${maxSlots} sessoes`);
     const slotId = id || `slot-${++this.seq}`;
@@ -72,6 +128,7 @@ export class SlotRegistry {
       popups: [],
       crashes: [],
       lightMode: false,
+      eco: false,
       lightApplied: false,
       lightFailed: false,
       lightCssKey: null,
@@ -80,7 +137,9 @@ export class SlotRegistry {
       lightQueue: Promise.resolve(),
     };
     view.webContents.on('render-process-gone', () => this.recreate(slot));
-    view.webContents.on('did-finish-load', () => this.lightMode.sync(slot));
+    view.webContents.on('did-finish-load', () =>
+      this.afterLoad(slot).catch((err) => console.error(`[${slot.id}] afterLoad:`, err?.message ?? err))
+    );
     this.bindOpenHandler(slot, view);
     this.slots.push(slot);
     if (this.addonPreloadPath) {
@@ -162,8 +221,10 @@ export class SlotRegistry {
 
   setViewsVisible(visible) {
     for (const slot of this.slots) {
-      slot.view.setVisible(visible);
-      for (const popup of slot.popups) popup.setVisible(visible);
+      if (!slot.view.webContents.isDestroyed()) slot.view.setVisible(visible);
+      for (const popup of slot.popups) {
+        if (!popup.webContents.isDestroyed()) popup.setVisible(visible);
+      }
     }
   }
 
@@ -215,7 +276,7 @@ export class SlotRegistry {
     fresh.webContents.on('render-process-gone', () => this.recreate(slot));
     fresh.webContents.on('did-finish-load', () => {
       this.applySlotPrefs(slot);
-      this.lightMode.sync(slot);
+      this.afterLoad(slot).catch((err) => console.error(`[${slot.id}] afterLoad:`, err?.message ?? err));
     });
     this.bindOpenHandler(slot, fresh);
     this.win.contentView.addChildView(fresh);

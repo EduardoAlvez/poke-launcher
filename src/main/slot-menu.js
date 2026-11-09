@@ -25,6 +25,12 @@ export function buildSlotMenu(slot, actions = {}) {
         click: () => actions.onZoom?.(step),
       })),
     },
+    {
+      label: 'Modo eco (reduz CPU)',
+      type: 'checkbox',
+      checked: slot?.eco === true,
+      click: () => actions.onEco?.(slot?.eco !== true),
+    },
     { type: 'separator' },
     { label: 'Renomear…', click: () => actions.onRename?.() },
     {

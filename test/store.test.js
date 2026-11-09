@@ -7,11 +7,15 @@ import {
   parseState,
   parseSlot,
   parseAutomation,
+  parseScript,
   defaultState,
   SlotStore,
   sweepOrphanPartitions,
   clampZoom,
   SCHEMA_VERSION,
+  MAX_SCRIPT_CODE,
+  MAX_SCRIPT_NAME,
+  MAX_SCRIPTS,
 } from '../src/main/store.js';
 
 const validSlot = {
@@ -213,4 +217,83 @@ test('sweep nao lanca quando a pasta de particoes esta inacessivel', async () =>
   assert.deepEqual(res.failed, ['Partitions']);
   assert.match(avisos.join('\n'), /ilegiveis/);
   await fs.rm(dir, { recursive: true, force: true });
+});
+
+const validScript = {
+  id: 'script-1',
+  name: 'Leitor de XP',
+  code: 'console.log("xp")',
+  enabled: true,
+  scope: { mode: 'all', slotIds: [] },
+};
+
+test('parseScript aceita, corta nome e normaliza escopo', () => {
+  const res = parseScript({ ...validScript, name: ` ${'x'.repeat(80)} ` });
+  assert.equal(res.ok, true);
+  assert.equal(res.script.name.length, MAX_SCRIPT_NAME);
+  assert.equal(res.script.enabled, true);
+  assert.deepEqual(res.script.scope, { mode: 'all', slotIds: [] });
+
+  const slots = parseScript({
+    ...validScript,
+    scope: { mode: 'slots', slotIds: ['slot-1', 'slot-1', 'slot-2', 'invalido'] },
+  });
+  assert.deepEqual(slots.script.scope, { mode: 'slots', slotIds: ['slot-1', 'slot-2'] });
+});
+
+test('parseScript recusa id ruim, nome vazio e codigo gigante', () => {
+  assert.equal(parseScript({ ...validScript, id: 'x' }).ok, false);
+  assert.equal(parseScript({ ...validScript, name: '   ' }).ok, false);
+  assert.equal(parseScript({ ...validScript, code: 'x'.repeat(MAX_SCRIPT_CODE + 1) }).ok, false);
+  assert.equal(parseScript(null).ok, false);
+});
+
+test('parseState preserva scripts validos e ignora os invalidos sem perder sessoes', () => {
+  const raw = JSON.stringify({
+    schemaVersion: SCHEMA_VERSION,
+    slots: [validSlot],
+    scripts: [validScript, { ...validScript, name: '' }, { ...validScript, id: 'ruim' }, validScript],
+  });
+  const res = parseState(raw);
+  assert.equal(res.ok, true);
+  assert.equal(res.state.slots.length, 1);
+  assert.equal(res.state.scripts.length, 1);
+  assert.equal(res.state.scripts[0].id, 'script-1');
+  assert.equal(res.warnings.length, 3);
+  assert.match(res.warnings.join('\n'), /script descartado/);
+  assert.match(res.warnings.join('\n'), /duplicado/);
+});
+
+test('parseState corta a lista de scripts no limite e avisa', () => {
+  const scripts = Array.from({ length: MAX_SCRIPTS + 2 }, (_, i) => ({
+    ...validScript,
+    id: `script-${i + 1}`,
+  }));
+  const res = parseState(JSON.stringify({ schemaVersion: SCHEMA_VERSION, slots: [], scripts }));
+  assert.equal(res.ok, true);
+  assert.equal(res.state.scripts.length, MAX_SCRIPTS);
+  assert.equal(res.warnings.length, 2);
+  assert.match(res.warnings.join('\n'), new RegExp(`limite de ${MAX_SCRIPTS}`));
+});
+
+test('estado antigo sem scripts continua valido e vem com lista vazia', () => {
+  const res = parseState(JSON.stringify({ schemaVersion: SCHEMA_VERSION, slots: [validSlot] }));
+  assert.equal(res.ok, true);
+  assert.deepEqual(res.state.scripts, []);
+  assert.deepEqual(defaultState().scripts, []);
+});
+
+test('parseSlot: eco e por sessao e desligado por padrao', () => {
+  assert.equal(parseSlot(validSlot).slot.eco, false);
+  assert.equal(parseSlot({ ...validSlot, eco: true }).slot.eco, true);
+  assert.equal(parseSlot({ ...validSlot, eco: 'sim' }).slot.eco, false);
+});
+
+test('buildSnapshot preserva eco e a lista de scripts', async () => {
+  const { buildSnapshot } = await import('../src/main/store.js');
+  const previous = { schemaVersion: 1, maxSlots: 2, slots: [], scripts: [validScript] };
+  const live = [{ id: 'slot-1', name: 'A', url: 'https://pokeidle.io/app', eco: true }];
+  const snap = buildSnapshot(previous, live);
+  assert.equal(snap.slots[0].eco, true);
+  assert.deepEqual(snap.scripts, [validScript]);
 });

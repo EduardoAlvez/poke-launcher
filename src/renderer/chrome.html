@@ -26,6 +26,7 @@
     <button id="stop-all" class="danger" hidden title="Parar todas as automacoes">Parar automações</button>
     <button id="close-popups" class="danger" hidden>Fechar popup de login (Esc)</button>
     <span id="diag-status" class="muted"></span>
+    <button id="scripts-btn" title="UserScripts por sessão">Scripts</button>
     <button id="diagnostics" title="Salva um relatorio dos seletores da pagina (sem dados da conta)">Diagnóstico</button>
   </header>
 
@@ -63,6 +64,43 @@
       <div class="actions">
         <button id="modal-cancel">Cancelar</button>
         <button id="modal-save" class="ok">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="scripts-modal" hidden>
+    <div class="modal-card wide" role="dialog" aria-modal="true" aria-labelledby="scripts-title">
+      <h2 id="scripts-title">UserScripts</h2>
+      <p class="hint">Roda o código dentro da página de cada sessão ao carregar. Use para ler dados do jogo ou montar seu próprio painel.</p>
+      <p id="scripts-warn" class="script-warn" hidden></p>
+      <div id="scripts-list" class="script-list"></div>
+      <div class="script-form">
+        <div class="grid">
+          <label>Nome
+            <input id="script-name" maxlength="40" placeholder="Leitor de XP" />
+          </label>
+          <label>Escopo
+            <select id="script-mode">
+              <option value="all">Todas as sessões</option>
+              <option value="slots">Sessões específicas</option>
+            </select>
+          </label>
+        </div>
+        <div id="script-slots" class="script-slots" hidden></div>
+        <label class="check">
+          <input type="checkbox" id="script-enabled" checked />
+          <span>Ativo (injeta ao carregar a página)</span>
+        </label>
+        <label class="script-code-label">Código
+          <textarea id="script-code" spellcheck="false" placeholder="// roda no mundo da página do jogo&#10;console.log('olá');"></textarea>
+        </label>
+      </div>
+      <p id="script-error" class="error"></p>
+      <div class="actions">
+        <button id="script-new">Novo</button>
+        <button id="script-run-now">Rodar agora</button>
+        <button id="scripts-close">Fechar</button>
+        <button id="script-save" class="ok">Salvar</button>
       </div>
     </div>
   </div>

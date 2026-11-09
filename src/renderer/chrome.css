@@ -116,3 +116,39 @@ button.danger:hover { border-color: #ff6b6b; }
   border-radius: 6px; padding: 6px 8px; font-size: 13px;
 }
 .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+#scripts-modal {
+  position: fixed; inset: 0; background: #0b0d11cc;
+  display: flex; align-items: center; justify-content: center; z-index: 10;
+}
+#scripts-modal[hidden] { display: none; }
+.modal-card.wide { width: 700px; max-height: 92vh; overflow: auto; }
+.hint { color: var(--muted); font-size: 12px; margin: 0 0 10px; }
+.script-warn {
+  color: var(--accent); font-size: 12px; margin: 0 0 10px;
+  border: 1px solid #4a3d1f; background: #221d10; border-radius: 6px; padding: 6px 8px;
+  user-select: text;
+}
+.script-warn[hidden] { display: none; }
+.script-list {
+  display: flex; flex-direction: column; gap: 4px;
+  max-height: 150px; overflow-y: auto; margin-bottom: 10px;
+  border: 1px solid #262b36; border-radius: 8px; padding: 6px;
+}
+.script-list:empty::before { content: 'Nenhum script ainda.'; color: var(--muted); font-size: 12px; }
+.script-row {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--chip); border: 1px solid #2c3240; border-radius: 6px; padding: 4px 8px;
+}
+.script-row .script-info { flex: 1; min-width: 0; }
+.script-row .script-name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.script-row .script-scope { color: var(--muted); font-size: 11px; }
+.script-row button { padding: 2px 6px; font-size: 11px; }
+.script-slots { display: flex; flex-wrap: wrap; gap: 10px; margin: 8px 0; }
+.script-slots[hidden] { display: none; }
+.script-slots label { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); }
+.script-code-label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.script-code-label textarea {
+  background: #0e1015; color: var(--fg); border: 1px solid #2c3240; border-radius: 6px;
+  padding: 8px; font: 12px/1.45 Consolas, "Courier New", monospace; resize: vertical;
+  min-height: 140px; user-select: text;
+}

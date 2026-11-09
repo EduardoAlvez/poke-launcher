@@ -4,10 +4,16 @@ import path from 'node:path';
 export const SCHEMA_VERSION = 1;
 export const DEFAULT_MAX_SLOTS = 8;
 export const MAX_SLOTS_LIMIT = 16;
+export const MAX_SCRIPTS = 50;
+export const MAX_SCRIPT_NAME = 40;
+export const MAX_SCRIPT_CODE = 100_000;
 
 export function defaultState() {
-  return { schemaVersion: SCHEMA_VERSION, maxSlots: DEFAULT_MAX_SLOTS, slots: [] };
+  return { schemaVersion: SCHEMA_VERSION, maxSlots: DEFAULT_MAX_SLOTS, slots: [], scripts: [] };
 }
+
+const SLOT_ID = /^slot-[a-z0-9-]+$/i;
+const SCRIPT_ID = /^script-[a-z0-9-]+$/i;
 
 function isHttpUrl(value) {
   if (typeof value !== 'string') return false;
@@ -29,8 +35,8 @@ function isRatio(value) {
 
 export function parseSlot(raw) {
   if (!raw || typeof raw !== 'object') return { ok: false, error: 'slot nao e objeto' };
-  const { id, name, url, partition, ratios, muted, zoomFactor, automation, lightMode } = raw;
-  if (typeof id !== 'string' || !/^slot-[a-z0-9-]+$/i.test(id)) {
+  const { id, name, url, partition, ratios, muted, zoomFactor, automation, lightMode, eco } = raw;
+  if (typeof id !== 'string' || !SLOT_ID.test(id)) {
     return { ok: false, error: `id invalido: ${JSON.stringify(id)}` };
   }
   if (!isHttpUrl(url)) return { ok: false, error: `url invalida no slot ${id}` };
@@ -49,9 +55,42 @@ export function parseSlot(raw) {
     muted: muted === true,
     zoomFactor: typeof zoomFactor === 'number' && zoomFactor > 0 && zoomFactor <= 3 ? zoomFactor : 1,
     lightMode: lightMode === true,
+    eco: eco === true,
     automation: parseAutomation(automation),
   };
   return { ok: true, slot };
+}
+
+/**
+ * UserScript por sessao (estilo Tampermonkey). O codigo roda na pagina, entao
+ * e guardado como texto e injetado so no host http(s) da propria sessao.
+ */
+export function parseScript(raw) {
+  if (!raw || typeof raw !== 'object') return { ok: false, error: 'script nao e objeto' };
+  if (typeof raw.id !== 'string' || !SCRIPT_ID.test(raw.id)) {
+    return { ok: false, error: `id de script invalido: ${JSON.stringify(raw.id)}` };
+  }
+  const name = typeof raw.name === 'string' ? raw.name.trim().slice(0, MAX_SCRIPT_NAME) : '';
+  if (!name) return { ok: false, error: `script ${raw.id} sem nome` };
+  const code = typeof raw.code === 'string' ? raw.code : '';
+  if (code.length > MAX_SCRIPT_CODE) {
+    return { ok: false, error: `codigo de "${name}" passa de ${MAX_SCRIPT_CODE} caracteres` };
+  }
+  const scopeRaw = raw.scope && typeof raw.scope === 'object' ? raw.scope : {};
+  const mode = scopeRaw.mode === 'slots' ? 'slots' : 'all';
+  const slotIds = Array.isArray(scopeRaw.slotIds)
+    ? [...new Set(scopeRaw.slotIds.filter((s) => typeof s === 'string' && SLOT_ID.test(s)))].slice(0, MAX_SLOTS_LIMIT)
+    : [];
+  return {
+    ok: true,
+    script: {
+      id: raw.id,
+      name,
+      code,
+      enabled: raw.enabled === true,
+      scope: { mode, slotIds: mode === 'slots' ? slotIds : [] },
+    },
+  };
 }
 
 export function parseAutomation(raw) {
@@ -98,12 +137,38 @@ export function parseState(rawText) {
   // limite descartaria a sessao (e a particao dela seria varrida depois).
   const stored = Number.isInteger(data.maxSlots) && data.maxSlots > 0 ? data.maxSlots : DEFAULT_MAX_SLOTS;
   const maxSlots = Math.max(Math.min(MAX_SLOTS_LIMIT, stored), slots.length);
-  return { ok: true, state: { schemaVersion: SCHEMA_VERSION, maxSlots, slots } };
+  // Script invalido nao pode custar as sessoes: descarta o script e segue,
+  // mas avisa (o modal nao pode fingir que o script nunca existiu).
+  const scripts = [];
+  const warnings = [];
+  if (data.scripts !== undefined && !Array.isArray(data.scripts)) {
+    warnings.push('scripts nao e array; lista ignorada');
+  }
+  const seenScripts = new Set();
+  for (const rawScript of Array.isArray(data.scripts) ? data.scripts : []) {
+    const parsed = parseScript(rawScript);
+    if (!parsed.ok) {
+      warnings.push(`script descartado: ${parsed.error}`);
+      continue;
+    }
+    if (seenScripts.has(parsed.script.id)) {
+      warnings.push(`script duplicado descartado: ${parsed.script.id}`);
+      continue;
+    }
+    if (scripts.length >= MAX_SCRIPTS) {
+      warnings.push(`script extra descartado (limite de ${MAX_SCRIPTS})`);
+      continue;
+    }
+    seenScripts.add(parsed.script.id);
+    scripts.push(parsed.script);
+  }
+  return { ok: true, state: { schemaVersion: SCHEMA_VERSION, maxSlots, slots, scripts }, warnings };
 }
 
 export function buildSnapshot(previous, slots) {
   return {
     ...previous,
+    scripts: Array.isArray(previous?.scripts) ? previous.scripts : [],
     slots: (slots ?? []).map((s) => {
       const prev = previous?.slots?.find((p) => p.id === s.id) ?? {};
       return {
@@ -115,6 +180,7 @@ export function buildSnapshot(previous, slots) {
         muted: s.muted === true,
         zoomFactor: s.zoomFactor ?? 1,
         lightMode: s.lightMode === true,
+        eco: s.eco === true,
         automation: s.automation ?? null,
       };
     }),
@@ -132,18 +198,16 @@ export class SlotStore {
 
   async read() {
     const primary = await this.readFile(this.filePath);
-    if (primary.ok) return { state: primary.state, source: 'primary', warnings: [] };
+    if (primary.ok) return { state: primary.state, source: 'primary', warnings: primary.warnings ?? [] };
     const backup = await this.readFile(this.backupPath);
     if (backup.ok) {
       const warning = `slots.json invalido (${primary.error}); recuperado do backup`;
-      console.error(`[store] ${warning}`);
-      return { state: backup.state, source: 'backup', warnings: [warning] };
+      return { state: backup.state, source: 'backup', warnings: [warning, ...(backup.warnings ?? [])] };
     }
     if (primary.error === 'arquivo inexistente') {
       return { state: defaultState(), source: 'defaults', warnings: [] };
     }
     const warning = `slots.json invalido (${primary.error}) e backup invalido (${backup.error}); usando padroes`;
-    console.error(`[store] ${warning}`);
     return { state: defaultState(), source: 'defaults', warnings: [warning] };
   }
 

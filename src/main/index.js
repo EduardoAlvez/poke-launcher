@@ -3,7 +3,8 @@ import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, session } from 'electron';
 import { SlotRegistry } from './slots.js';
-import { SlotStore, sweepOrphanPartitions, defaultState, buildSnapshot, clampZoom } from './store.js';
+import { SlotStore, sweepOrphanPartitions, defaultState, buildSnapshot, clampZoom, parseScript, MAX_SCRIPTS } from './store.js';
+import { injectScripts, newScriptId } from './scripts.js';
 import { Notifier, parseGameEvent } from './notifications.js';
 import { createTray } from './tray.js';
 import { loadPack, buildAddonPreload, applyPackCss, sendPackRules, loadAutomationPack, auditPack, collectSelectors } from './addons.js';
@@ -62,6 +63,7 @@ registry.onLightChange = () => sendState();
 let win = null;
 let store = null;
 let persisted = defaultState();
+let bootWarnings = [];
 let trayHandle = null;
 let quitting = false;
 let addonPack = null;
@@ -144,6 +146,7 @@ function pushState() {
       lightFailed: s.lightFailed === true,
       muted: s.muted === true,
       zoomFactor: s.zoomFactor ?? 1,
+      eco: s.eco === true,
       automation: {
         enabled: s.automation?.enabled === true,
         exitEconomy: s.automation?.exitEconomy !== false,
@@ -216,7 +219,21 @@ function createWindow() {
     registry.destroyAll();
     win = null;
   });
-  win.webContents.once('did-finish-load', sendState);
+  win.webContents.on('did-finish-load', () => {
+    // Se o chrome recarregar/crashar com um modal aberto, as views nativas
+    // ficariam escondidas sem caminho de volta ate outro modal.
+    registry.setViewsVisible(true);
+    sendState();
+  });
+  win.webContents.on('render-process-gone', (_event, details) => {
+    console.error(`[chrome] renderer caiu: ${details?.reason ?? 'desconhecido'}`);
+    registry.setViewsVisible(true);
+    if (!win || win.isDestroyed()) return;
+    // Sem UI nao ha como reabrir um modal ou clicar em "Fechar": recarrega.
+    setTimeout(() => {
+      if (win && !win.isDestroyed()) win.webContents.reload();
+    }, 1000);
+  });
   const selfTestHide = Number(process.env.POKE_SELFTEST_HIDE);
   if (selfTestHide > 0) {
     setTimeout(() => win?.close(), selfTestHide * 1000);
@@ -297,6 +314,7 @@ async function restoreSlots() {
         created.muted = slot.muted;
         created.zoomFactor = slot.zoomFactor;
         created.lightMode = slot.lightMode === true;
+        created.eco = slot.eco === true;
         registry.applySlotPrefs(created);
         if (slot.automation) {
           created.automation = { ...slot.automation, enabled: false };
@@ -363,6 +381,15 @@ async function setSlotZoom(slot, factor) {
   sendState();
 }
 
+async function setSlotEco(slot, on) {
+  slot.eco = on === true;
+  // Persistir primeiro: numa sessao com CPU saturada o executeJavaScript pode
+  // demorar e o menu nao pode parecer travado esperando o patch.
+  await persist();
+  sendState();
+  registry.applyEcoPrefs(slot).catch((err) => console.error(`[${slot.id}] modo eco:`, err?.message ?? err));
+}
+
 async function resetSlot(slot) {
   const permitido = canReset(registry.get(slot?.id));
   if (!permitido.ok) return permitido;
@@ -414,16 +441,77 @@ ipcMain.handle('launcher:slot-menu', (event, payload) => {
   if (!isChrome(event.sender)) return false;
   const slot = registry.get(payload?.id);
   if (!slot || !win || win.isDestroyed()) return false;
+  const run = (p) => Promise.resolve(p).catch((err) => console.error(`[slot-menu] ${slot.id}:`, err?.message ?? err));
   const menu = Menu.buildFromTemplate(
     buildSlotMenu(slot, {
-      onMute: (muted) => setSlotMuted(slot, muted),
-      onZoom: (factor) => setSlotZoom(slot, factor),
+      onMute: (muted) => run(setSlotMuted(slot, muted)),
+      onZoom: (factor) => run(setSlotZoom(slot, factor)),
+      onEco: (on) => run(setSlotEco(slot, on)),
       onRename: () => win.webContents.send('launcher:rename-request', { id: slot.id }),
-      onReset: () => resetSlot(slot),
+      onReset: () => run(resetSlot(slot)),
     })
   );
   menu.popup({ window: win });
   return true;
+});
+
+ipcMain.handle('launcher:scripts', (event) => {
+  if (!isChrome(event.sender)) return { scripts: [], warnings: [] };
+  return { scripts: persisted.scripts ?? [], warnings: bootWarnings };
+});
+
+ipcMain.handle('launcher:script-save', async (event, payload) => {
+  if (!isChrome(event.sender)) return { ok: false, error: 'origem invalida' };
+  const input = payload?.script ?? {};
+  const existing = persisted.scripts ?? [];
+  let id = input.id;
+  if (!id) {
+    do {
+      id = newScriptId();
+    } while (existing.some((s) => s.id === id));
+  }
+  const parsed = parseScript({ ...input, id });
+  if (!parsed.ok) return { ok: false, error: parsed.error };
+  const scripts = [...existing];
+  const i = scripts.findIndex((s) => s.id === parsed.script.id);
+  if (i === -1 && scripts.length >= MAX_SCRIPTS) {
+    return { ok: false, error: `Limite de ${MAX_SCRIPTS} scripts` };
+  }
+  if (i === -1) scripts.push(parsed.script);
+  else scripts[i] = parsed.script;
+  persisted.scripts = scripts;
+  await persist();
+  sendState();
+  return { ok: true, script: parsed.script };
+});
+
+ipcMain.handle('launcher:script-delete', async (event, payload) => {
+  if (!isChrome(event.sender)) return { ok: false, error: 'origem invalida' };
+  const id = String(payload?.id ?? '');
+  persisted.scripts = (persisted.scripts ?? []).filter((s) => s.id !== id);
+  await persist();
+  sendState();
+  return { ok: true };
+});
+
+ipcMain.handle('launcher:script-run', async (event, payload) => {
+  if (!isChrome(event.sender)) return { ok: false, error: 'origem invalida' };
+  const slot = payload?.id ? registry.get(payload.id) : null;
+  if (payload?.id && !slot) return { ok: false, error: 'sessao inexistente' };
+  const targets = slot ? [slot] : registry.slots;
+  let sessions = 0;
+  let executions = 0;
+  let failures = 0;
+  for (const target of targets) {
+    const res = await injectScripts(target.view.webContents, persisted.scripts ?? [], target.id, {
+      log: console.error,
+      baseUrl: target.url,
+    });
+    if (res.ran.length || res.failed.length) sessions += 1;
+    executions += res.ran.length;
+    failures += res.failed.length;
+  }
+  return { ok: true, sessions, executions, failures };
 });
 
 ipcMain.handle('launcher:set-layout', (event, payload) => {
@@ -547,6 +635,8 @@ app.whenReady().then(async () => {
   let stateReadable = true;
   try {
     const loaded = await store.read();
+    bootWarnings = loaded.warnings ?? [];
+    for (const warning of bootWarnings) console.error(`[store] ${warning}`);
     if (loaded.source === 'defaults' && loaded.warnings.length > 0) {
       stateReadable = false;
       // Nao sobrescrever um estado ilegivel: guarda o arquivo para recuperacao
@@ -584,6 +674,8 @@ app.whenReady().then(async () => {
   warmExtensionCache().catch((err) =>
     console.error('[extensions] download em segundo plano:', err.message)
   );
+  registry.scriptRunner = (slot, wc = slot.view.webContents) =>
+    injectScripts(wc, persisted.scripts ?? [], slot.id, { log: console.error, baseUrl: slot.url });
   await restoreSlots().catch((err) => console.error('[boot] restaurar sessoes falhou:', err));
 
   const lightWatch = setInterval(() => {

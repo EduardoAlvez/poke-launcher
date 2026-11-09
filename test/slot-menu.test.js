@@ -4,10 +4,11 @@ import { buildSlotMenu, ZOOM_STEPS } from '../src/main/slot-menu.js';
 
 test('menu do chip reflete mudo e zoom e chama as acoes', () => {
   const chamadas = [];
-  const slot = { id: 'slot-1', name: 'Conta 1', muted: true, zoomFactor: 1.25, automation: { enabled: false } };
+  const slot = { id: 'slot-1', name: 'Conta 1', muted: true, zoomFactor: 1.25, eco: true, automation: { enabled: false } };
   const menu = buildSlotMenu(slot, {
     onMute: (m) => chamadas.push(['mute', m]),
     onZoom: (z) => chamadas.push(['zoom', z]),
+    onEco: (on) => chamadas.push(['eco', on]),
     onRename: () => chamadas.push(['rename']),
     onReset: () => chamadas.push(['reset']),
   });
@@ -30,6 +31,22 @@ test('menu do chip reflete mudo e zoom e chama as acoes', () => {
   assert.deepEqual(chamadas.at(-1), ['rename']);
   menu.find((i) => i.label?.startsWith('Reler login')).click();
   assert.deepEqual(chamadas.at(-1), ['reset']);
+});
+
+test('menu do chip alterna o modo eco', () => {
+  const chamadas = [];
+  const ligado = buildSlotMenu({ name: 'Conta', eco: true }, { onEco: (on) => chamadas.push(on) });
+  const item = ligado.find((i) => i.label === 'Modo eco (reduz CPU)');
+  assert.equal(item.type, 'checkbox');
+  assert.equal(item.checked, true);
+  item.click();
+  assert.deepEqual(chamadas, [false]);
+
+  const desligado = buildSlotMenu({ name: 'Conta' }, { onEco: (on) => chamadas.push(on) });
+  const item2 = desligado.find((i) => i.label === 'Modo eco (reduz CPU)');
+  assert.equal(item2.checked, false);
+  item2.click();
+  assert.deepEqual(chamadas, [false, true]);
 });
 
 test('menu desabilita reler login com automacao ativa', () => {
