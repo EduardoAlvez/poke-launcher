@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('launcher', {
   saveScript: (script) => ipcRenderer.invoke('launcher:script-save', { script }),
   deleteScript: (id) => ipcRenderer.invoke('launcher:script-delete', { id }),
   runScripts: (id) => ipcRenderer.invoke('launcher:script-run', { id }),
+  hunt: (id, opts) => ipcRenderer.invoke('launcher:hunt', { id, levelCap: opts?.levelCap === true }),
+  dexSet: (id, on) => ipcRenderer.invoke('launcher:dex-set', { id, on: on === true }),
   onState: (cb) => ipcRenderer.on('launcher:state', (_e, slots) => cb(slots)),
   onRenameRequest: (cb) => ipcRenderer.on('launcher:rename-request', (_e, payload) => cb(payload ?? {})),
 });

@@ -614,3 +614,179 @@ scriptRunNow.addEventListener('click', async () => {
     scriptRunNow.disabled = false;
   }
 });
+
+// ---- Painel de caça (Fase 9) ----
+const huntBtn = document.getElementById('hunt-btn');
+const huntModal = document.getElementById('hunt-modal');
+const huntSlotSel = document.getElementById('hunt-slot');
+const huntEnable = document.getElementById('hunt-enable');
+const huntLevelcap = document.getElementById('hunt-levelcap');
+const huntLevelcapNv = document.getElementById('hunt-levelcap-nv');
+const huntRefresh = document.getElementById('hunt-refresh');
+const huntClose = document.getElementById('hunt-close');
+const huntStatus = document.getElementById('hunt-status');
+const huntBody = document.getElementById('hunt-body');
+const huntArea = document.getElementById('hunt-area');
+const huntMissing = document.getElementById('hunt-missing');
+const huntMissingCount = document.getElementById('hunt-missing-count');
+const huntAreaList = document.getElementById('hunt-area-list');
+const huntProgress = document.getElementById('hunt-progress');
+let huntTimer = null;
+let huntBusy = false;
+
+function fillHuntSlots() {
+  const prev = huntSlotSel.value;
+  huntSlotSel.textContent = '';
+  if (!lastSlots.length) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'Nenhuma sessão aberta';
+    huntSlotSel.appendChild(opt);
+    return '';
+  }
+  for (const s of lastSlots) {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = s.name || s.id;
+    huntSlotSel.appendChild(opt);
+  }
+  if (prev && lastSlots.some((s) => s.id === prev)) huntSlotSel.value = prev;
+  return huntSlotSel.value;
+}
+
+function huntRow(text, meta, cls) {
+  const li = document.createElement('li');
+  if (cls) li.className = cls;
+  const name = document.createElement('span');
+  name.className = 'h-nome';
+  name.textContent = text;
+  li.appendChild(name);
+  if (meta) {
+    const m = document.createElement('span');
+    m.className = 'h-meta';
+    m.textContent = meta;
+    li.appendChild(m);
+  }
+  return li;
+}
+
+function renderHunt(res) {
+  if (!res || !res.ok) {
+    huntStatus.hidden = false;
+    huntStatus.textContent = (res && res.error) || 'Sem resposta do painel.';
+    huntBody.hidden = true;
+    huntLevelcap.disabled = true;
+    return;
+  }
+  if (!res.enabled) {
+    huntEnable.checked = false;
+    huntBody.hidden = true;
+    huntLevelcap.disabled = true;
+    huntStatus.hidden = false;
+    huntStatus.textContent =
+      'Ative “Ler dex desta sessão” para o launcher observar (só ler) o tráfego do jogo. Nada é enviado e a dex não é salva em disco.';
+    return;
+  }
+  if (!res.ready) {
+    huntEnable.checked = true;
+    huntBody.hidden = true;
+    huntLevelcap.disabled = true;
+    huntStatus.hidden = false;
+    huntStatus.textContent = 'Leitura ligada; recarreguei a aba. Os dados chegam quando o jogo conectar nesta conta.';
+    return;
+  }
+  huntEnable.checked = true;
+  huntStatus.hidden = true;
+  huntBody.hidden = false;
+  huntLevelcap.disabled = !res.trainerLevel;
+  huntLevelcapNv.textContent = res.trainerLevel ? `(≤ ${res.trainerLevel})` : '';
+  const view = res.view;
+  huntArea.textContent = view.current
+    ? `Área atual: ${view.current.nome} · nível ${view.current.nivel} (${view.current.area})`
+    : 'Sem área de caça reconhecida nesta sessão.';
+  huntMissing.textContent = '';
+  const miss = res.missing || { total: 0, items: [] };
+  huntMissingCount.textContent = miss.total
+    ? `· ${miss.total}${miss.cortadosPorNivel ? ` (${miss.cortadosPorNivel} acima do seu nível)` : ''}`
+    : '';
+  for (const item of miss.items) {
+    const meta = `nv ${item.nivel}${item.tentativas ? ` · ${item.tentativas} derrotas` : ''}`;
+    huntMissing.appendChild(huntRow(item.nome, meta, null));
+  }
+  huntAreaList.textContent = '';
+  for (const item of view.faltam) huntAreaList.appendChild(huntRow(item.nome, `faltam · ${item.k} tentativas`, 'catch'));
+  for (const item of view.tem) huntAreaList.appendChild(huntRow(item.nome, `capturado (${item.c})`, null));
+  huntProgress.textContent = `Sua dex: ${view.progress.captured} capturadas · catálogo do jogo: ${view.progress.catalogSize} espécies.`;
+}
+
+async function loadHunt() {
+  if (huntBusy) return;
+  huntBusy = true;
+  try {
+    const id = fillHuntSlots();
+    if (!id) {
+      huntStatus.hidden = false;
+      huntStatus.textContent = 'Abra uma sessão primeiro.';
+      huntBody.hidden = true;
+      return;
+    }
+    renderHunt(await window.launcher.hunt(id, { levelCap: huntLevelcap.checked }));
+  } catch (err) {
+    huntStatus.hidden = false;
+    huntStatus.textContent = err?.message || 'Falha ao ler o painel.';
+    huntBody.hidden = true;
+  } finally {
+    huntBusy = false;
+  }
+}
+
+function openHunt() {
+  huntModal.hidden = false;
+  window.launcher.setViewsVisible(false);
+  fillHuntSlots();
+  loadHunt();
+  huntTimer = setInterval(loadHunt, 2500);
+  huntSlotSel.focus();
+}
+
+function closeHunt() {
+  huntModal.hidden = true;
+  if (huntTimer) {
+    clearInterval(huntTimer);
+    huntTimer = null;
+  }
+  window.launcher.setViewsVisible(true);
+  huntBtn.focus();
+}
+
+huntBtn.addEventListener('click', openHunt);
+huntClose.addEventListener('click', closeHunt);
+huntRefresh.addEventListener('click', loadHunt);
+huntSlotSel.addEventListener('change', loadHunt);
+huntLevelcap.addEventListener('change', loadHunt);
+huntModal.addEventListener('click', (e) => {
+  if (e.target === huntModal) closeHunt();
+});
+huntEnable.addEventListener('change', async () => {
+  const id = huntSlotSel.value;
+  if (!id) return;
+  huntEnable.disabled = true;
+  try {
+    const res = await window.launcher.dexSet(id, huntEnable.checked);
+    if (!res?.ok) {
+      huntEnable.checked = !huntEnable.checked;
+      huntStatus.hidden = false;
+      huntStatus.textContent = res?.error || 'Não foi possível ligar/desligar agora.';
+    }
+  } catch (err) {
+    huntEnable.checked = !huntEnable.checked;
+    huntStatus.hidden = false;
+    huntStatus.textContent = err?.message || 'Falha ao alternar a leitura.';
+  } finally {
+    huntEnable.disabled = false;
+    loadHunt();
+  }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !huntModal.hidden) closeHunt();
+});

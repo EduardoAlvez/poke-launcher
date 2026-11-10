@@ -129,6 +129,24 @@ button.danger:hover { border-color: #ff6b6b; }
   user-select: text;
 }
 .script-warn[hidden] { display: none; }
+.hunt-head { display: flex; align-items: center; gap: 14px; margin: 6px 0 12px; flex-wrap: wrap; }
+.hunt-head label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--fg); }
+.hunt-head select {
+  background: #0e1015; color: var(--fg); border: 1px solid #2c3240; border-radius: 6px; padding: 5px 8px; font-size: 12px;
+}
+.hunt-area { color: var(--fg); font-size: 13px; margin: 4px 0 10px; }
+.hunt-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.hunt-cols h3 { font-size: 12px; color: var(--muted); margin: 0 0 6px; text-transform: uppercase; letter-spacing: .4px; }
+.hunt-list {
+  list-style: none; margin: 0; padding: 6px; max-height: 300px; overflow-y: auto;
+  border: 1px solid #262b36; border-radius: 8px; display: flex; flex-direction: column; gap: 3px;
+}
+.hunt-list:empty::before { content: 'vazio'; color: var(--muted); font-size: 12px; }
+.hunt-list li { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 3px 6px; border-radius: 5px; background: var(--chip); }
+.hunt-list li .h-nome { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hunt-list li .h-meta { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.hunt-list li.catch { border: 1px solid #3a3f4d; }
+.hunt-list li.catch b { color: var(--accent); font-weight: 600; }
 .script-list {
   display: flex; flex-direction: column; gap: 4px;
   max-height: 150px; overflow-y: auto; margin-bottom: 10px;

@@ -35,6 +35,8 @@ Baixe o instalador na página de releases:
 - **Automação de lançamentos (opt-in)** — veja o aviso abaixo.
 - **Modo leve por sessão** (`LEVE` no chip) — cena oculta e rAF limitado, sem parar a caça
   nem os lançamentos; pensado para notebook fraco.
+- **Painel de caça por sessão** (`Caça` na toolbar, opt-in e só leitura) — mostra a área atual,
+  o que a dex já tem e quais espécies faltam; veja o aviso abaixo.
 
 ## Automação: leia antes de usar
 
@@ -75,6 +77,23 @@ faz o oposto: mantém o campo chegando e corta o custo por fora.
 O custo esperado fica próximo do Modo Economia do jogo, mas com o `campo` ainda chegando — é isso
 que permite lançar bola numa máquina fraca.
 
+## Painel de caça (opcional, só leitura)
+
+O botão **Caça** abre um painel por sessão que mostra a área de caça atual, quantas espécies a conta
+já capturou e **quais ainda faltam** no catálogo do jogo. É **opt-in**: nada acontece até você marcar
+"Ler dex desta sessão" naquela sessão.
+
+- A leitura é feita por uma **extensão local mínima** (sem permissões, sem rede) que observa o
+  WebSocket **de recebimento** do próprio jogo e repassa o estado que o jogo já manda para aquela aba.
+  O launcher **nunca envia nada** nesse socket nem altera o tráfego — é só leitura do que já chega.
+- A Pokédex **não é salva em disco**: o launcher só espelha, em memória, o que o servidor mandou. Fechar
+  a sessão limpa tudo. Desligar o toggle apaga o espelho imediatamente.
+- O opt-in mora no `localStorage` daquela partição (sessão). "Reler login" (que limpa a partição) desliga
+  a leitura junto — comportamento esperado.
+- Envolver o `WebSocket` da página é uma técnica **detectável em princípio** pelo jogo. É o mesmo padrão de
+  extensões comunitárias já usadas no PokeIdle, mas o risco de qualquer implicação na conta é seu; por isso
+  é ligado por você, sessão a sessão, e descrito aqui sem promessa de invisibilidade.
+
 Dois modos: **intervalo fixo** e **até capturar** (para quando a captura chega até 20 s depois de um arremesso). A parada por
 captura é registrada no processo principal: o `AUTO` fica vermelho, a sessão é desligada e é preciso
 marcar o aviso de novo para reativar. Cada sessão usa a própria conta; a mesma conta em dois slots
@@ -90,15 +109,17 @@ derruba a primeira (o jogo fecha a sessão antiga). A automação está incluíd
 ```bash
 npm install
 npm start        # abre o launcher
-npm test         # testes (layout, store, notificacoes, addon, automacao)
+npm test         # testes (layout, store, notificacoes, addon, automacao, scripts/eco, painel de caca)
 npm run dist     # gera instalador (Windows: NSIS; Linux: deb)
 ```
 
 ## Dados e privacidade
 
 Tudo é local. O estado fica em `app.getPath('userData')` (`slots.json` + backup `.bak`), os cookies
-ficam nas partições do Chromium e a extensão é extraída em `userData/extensions`. O diagnóstico fica em
-`launcher.log` na mesma pasta (rotacionado em 1 MB), inclusive os avisos do processo principal. Nenhum dado é enviado para servidores do launcher.
+ficam nas partições do Chromium, a extensão é extraída em `userData/extensions` e o hook do painel
+de caça em `userData/dexhook`. O diagnóstico fica em `launcher.log` na mesma pasta (rotacionado em
+1 MB), inclusive os avisos do processo principal. A Pokédex vista no painel **não é gravada**: vive
+só em memória enquanto a sessão estiver aberta. Nenhum dado é enviado para servidores do launcher.
 
 ## Estrutura
 
@@ -107,6 +128,7 @@ src/main       processo principal (janela, grade, store, tray, addons, automacao
 src/preload    bridges sandboxed (CJS): chrome.cjs (UI) e addon.cjs (pagina do jogo)
 src/renderer   toolbar/grade (HTML/CSS/JS puro)
 src/shared     motores puros (layout, engine de regras, automacao)
+src/dexhook    micro-extensao local so-leitura do painel de caca (mundo da pagina)
 src/main/rules packs de dados por jogo (CSS + regras + ancoras da automacao)
 test           node:test
 ```

@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Poke Launcher Dex Hook",
+  "version": "1.0",
+  "description": "So observa o WebSocket do jogo para o painel de caca. Passivo ate o usuario ligar.",
+  "content_scripts": [
+    {
+      "matches": ["https://pokeidle.io/*", "https://*.pokeidle.io/*"],
+      "js": ["inject.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ]
+}

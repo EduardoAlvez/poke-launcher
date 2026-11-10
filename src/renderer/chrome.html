@@ -26,6 +26,7 @@
     <button id="stop-all" class="danger" hidden title="Parar todas as automacoes">Parar automações</button>
     <button id="close-popups" class="danger" hidden>Fechar popup de login (Esc)</button>
     <span id="diag-status" class="muted"></span>
+    <button id="hunt-btn" title="Painel de caça: o que falta capturar na área">Caça</button>
     <button id="scripts-btn" title="UserScripts por sessão">Scripts</button>
     <button id="diagnostics" title="Salva um relatorio dos seletores da pagina (sem dados da conta)">Diagnóstico</button>
   </header>
@@ -101,6 +102,45 @@
         <button id="script-run-now">Rodar agora</button>
         <button id="scripts-close">Fechar</button>
         <button id="script-save" class="ok">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="hunt-modal" hidden>
+    <div class="modal-card wide" role="dialog" aria-modal="true" aria-labelledby="hunt-title">
+      <h2 id="hunt-title">Painel de caça</h2>
+      <p class="hint">Mostra o que a área oferece e quais espécies a conta ainda não capturou. Só lê o tráfego do jogo; nada é enviado.</p>
+      <div class="hunt-head">
+        <label>Sessão
+          <select id="hunt-slot"></select>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="hunt-enable" />
+          <span>Ler dex desta sessão</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="hunt-levelcap" checked />
+          <span>Só até meu nível <span id="hunt-levelcap-nv" class="muted"></span></span>
+        </label>
+        <button id="hunt-refresh">Atualizar</button>
+      </div>
+      <p id="hunt-status" class="script-warn" hidden></p>
+      <div id="hunt-body" hidden>
+        <p id="hunt-area" class="hunt-area"></p>
+        <div class="hunt-cols">
+          <div>
+            <h3>Faltam para capturar <span id="hunt-missing-count" class="muted"></span></h3>
+            <ul id="hunt-missing" class="hunt-list"></ul>
+          </div>
+          <div>
+            <h3>Disponíveis nesta área</h3>
+            <ul id="hunt-area-list" class="hunt-list"></ul>
+          </div>
+        </div>
+        <p id="hunt-progress" class="muted"></p>
+      </div>
+      <div class="actions">
+        <button id="hunt-close">Fechar</button>
       </div>
     </div>
   </div>

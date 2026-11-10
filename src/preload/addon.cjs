@@ -4,6 +4,30 @@ let automationHandle = null;
 let lastRulesJson = null;
 let lastAutomationJson = null;
 
+// ---- Ponte do painel de caça (Fase 9) ----
+// O hook roda no MUNDO DA PAGINA (extensao dexhook) e fala com a gente por
+// postMessage. Quem manda 'welcome'/'estado' adiante e o MAIN (processo), que
+// re-parsa tudo com caps: esta ponte NUNCA e fonte de verdade, sao dados de
+// uma pagina nao-confiavel chegando por um canal que a propria pagina sabe o
+// nome. Sem o opt-in ligado o hook nem instala, entao aqui fica silencioso.
+const DEX_CHANNEL = 'pokeLauncherDex';
+
+window.addEventListener('message', (ev) => {
+  const d = ev && ev.data;
+  if (!d || d.source !== DEX_CHANNEL) return;
+  const t = typeof d.t === 'string' ? d.t : '';
+  if (t !== 'welcome' && t !== 'estado' && t !== 'ready') return;
+  ipcRenderer.send('hunt:state', { t, data: d.data ?? null });
+});
+
+ipcRenderer.on('dex:get', () => {
+  try {
+    window.postMessage({ source: DEX_CHANNEL, t: 'get' }, window.location.origin);
+  } catch (err) {
+    console.error('[dex] pedido de snapshot falhou:', err && err.message);
+  }
+});
+
 function install(rules) {
   const engine = globalThis.PokeAddonEngine;
   if (!engine || typeof engine.installEngine !== 'function') {

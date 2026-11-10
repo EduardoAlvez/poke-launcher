@@ -1,7 +1,8 @@
 import { WebContentsView } from 'electron';
 import { computeGrid, popupBounds, TOOLBAR_H } from './layout.js';
 import { installSlotExtensions } from './extensions.js';
-import { registerAddonPreload } from './addons.js';
+import { installDexHook } from './dex-hook.js';
+import { registerAddonPreload, matchesGame } from './addons.js';
 import { LightMode } from './light-mode.js';
 import { ECO_INSTALL, ecoSetExpr } from './eco.js';
 import { hostAllowed, withTimeout, INJECT_TIMEOUT_MS } from './scripts.js';
@@ -34,6 +35,7 @@ export class SlotRegistry {
     this.onLightChange = null;
     this.onCrash = null;
     this.scriptRunner = null;
+    this.dexHookDir = null;
     this.disposed = false;
     this.lightMode = new LightMode({ onChange: (slot) => this.onLightChange?.(slot) });
   }
@@ -150,6 +152,11 @@ export class SlotRegistry {
     await installSlotExtensions(view.webContents.session, url).catch((err) =>
       console.error(`[${slotId}] extensao indisponivel:`, err.message)
     );
+    if (this.dexHookDir && matchesGame(url)) {
+      await installDexHook(view.webContents.session, this.dexHookDir).catch((err) =>
+        console.error(`[${slotId}] dex-hook:`, err.message)
+      );
+    }
     if (!this.slots.includes(slot)) return slot;
     if (this.win && !this.win.isDestroyed()) {
       this.win.contentView.addChildView(view);

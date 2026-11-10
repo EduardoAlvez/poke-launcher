@@ -4,13 +4,15 @@ import { fileURLToPath } from 'node:url';
 import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, session } from 'electron';
 import { SlotRegistry } from './slots.js';
 import { SlotStore, sweepOrphanPartitions, defaultState, buildSnapshot, clampZoom, parseScript, MAX_SCRIPTS } from './store.js';
-import { injectScripts, newScriptId } from './scripts.js';
+import { injectScripts, newScriptId, withTimeout, INJECT_TIMEOUT_MS } from './scripts.js';
 import { Notifier, parseGameEvent } from './notifications.js';
 import { createTray } from './tray.js';
-import { loadPack, buildAddonPreload, applyPackCss, sendPackRules, loadAutomationPack, auditPack, collectSelectors } from './addons.js';
+import { loadPack, buildAddonPreload, applyPackCss, sendPackRules, loadAutomationPack, auditPack, collectSelectors, matchesGame } from './addons.js';
 import { LIGHT_SAMPLE_SCENE } from './light.js';
 import { AutomationController, RISK_TEXT } from './automation.js';
 import { warmExtensionCache } from './extensions.js';
+import { buildDexHook, installDexHook, dexFlagExpr } from './dex-hook.js';
+import { createHuntState, loadWelcome, applyDelta, huntView, catalogMissing } from './hunt-report.js';
 import { openLog, formatArgs } from './log.js';
 import { buildSlotMenu } from './slot-menu.js';
 import { canReset, RESET_DETAIL } from './reset.js';
@@ -69,6 +71,9 @@ let quitting = false;
 let addonPack = null;
 let automationPack = null;
 const audited = new Set();
+// Painel de caça (Fase 9): o caminho hook usa `huntStates` (declarado junto dos
+// handlers abaixo). A dex mora no servidor; nunca vai ao slots.json.
+let dexHookDir = null;
 
 const automation = new AutomationController({
   getSlot: (id) => registry.get(id),
@@ -286,12 +291,21 @@ function wireAddonPack() {
         }, 8000).unref?.();
       }
     };
+    // Reload na MESMA url apaga o CSS e o documento, mas nao muda a chave do
+    // cache: sem limpar aqui, o apply de dom-ready acha que ja injetou e o
+    // pack nunca volta (bug pego no aceite 5.6 de 2026-11-10).
+    contents.on('did-start-loading', () => {
+      injected.delete(contents.id);
+      cssKeys.delete(contents.id);
+      audited.delete(contents.id);
+    });
     contents.on('dom-ready', apply);
     contents.on('did-finish-load', apply);
     contents.on('did-navigate-in-page', apply);
     contents.on('destroyed', () => {
       injected.delete(contents.id);
       cssKeys.delete(contents.id);
+      audited.delete(contents.id);
     });
   });
 }
@@ -353,6 +367,8 @@ ipcMain.handle('launcher:add-slot', async (event, payload) => {
 ipcMain.handle('launcher:remove-slot', async (event, payload) => {
   if (!isChrome(event.sender)) return;
   registry.remove(payload?.id);
+  huntStates.delete(payload?.id);
+  huntRate.delete(payload?.id);
   await persist();
   sendState();
 });
@@ -416,6 +432,11 @@ async function resetSlot(slot) {
     // regravar o cookie de sessao depois do clearStorageData.
     if (!wc.isDestroyed()) await wc.loadURL('about:blank');
     await session.fromPartition(`persist:${slot.id}`).clearStorageData();
+    // O clearStorageData apaga o flag do dex-hook na particao. Sem limpar o
+    // espelho, o painel seguiria mostrando a dex da conta ANTIGA como se fosse
+    // da nova (o replay do get nem roda: ready continua true).
+    huntStates.delete(slot.id);
+    huntRate.delete(slot.id);
     slot.loggedIn = false;
     await voltar();
     sendState();
@@ -541,6 +562,115 @@ ipcMain.on('addon:recon-result', (event, report) => {
 ipcMain.on('launcher:views-visible', (event, visible) => {
   if (!isChrome(event.sender)) return;
   registry.setViewsVisible(visible === true);
+});
+
+// ---- Painel de caça (Fase 9) ----
+// 'hunt:state' chega pelo preload do addon (mundo isolado da SESSÃO do jogo).
+// O payload veio de uma pagina NAO-CONFIÁVEL: quem ingere so depois de (1)
+// confirmar que o sender e a view principal de uma sessao E está no host do
+// jogo agora — senão um popup ou uma aba em OAuth forjaria dados —, (2) checar
+// que aquele slot tem o opt-in LIGADO no main (a verdade do opt-in mora só no
+// main: a pagina so decide embrulhar o socket, quem decide guardar e aqui), e
+// (3) passar por um token-bucket (a ponte e um relay ilimitado de JS da pagina
+// para o IPC do main; um loop hostil ou uma CDN comprometida nao pode arrastar
+// o processo principal). O conteudo ainda e re-parseado com caps (hunt-report.js).
+const huntStates = new Map();
+const huntRate = new Map();
+const HUNT_BURST = 60;
+const HUNT_REFILL_PER_MS = 60 / 60_000;
+
+function huntAllowed(slotId, now) {
+  let bucket = huntRate.get(slotId);
+  if (!bucket) {
+    bucket = { tokens: HUNT_BURST, last: now };
+    huntRate.set(slotId, bucket);
+  }
+  bucket.tokens = Math.min(HUNT_BURST, bucket.tokens + (now - bucket.last) * HUNT_REFILL_PER_MS);
+  bucket.last = now;
+  if (bucket.tokens < 1) return false;
+  bucket.tokens -= 1;
+  return true;
+}
+
+ipcMain.on('hunt:state', (event, msg) => {
+  const slot = registry.findByWebContentsId(event.sender.id);
+  if (!slot) return;
+  if (event.sender !== slot.view?.webContents) return;
+  if (!matchesGame(event.sender.getURL())) return;
+  const st = huntStates.get(slot.id);
+  if (!st?.enabled) return;
+  if (!huntAllowed(slot.id, Date.now())) return;
+  if (msg?.t === 'welcome') loadWelcome(st, msg.data);
+  else if (msg?.t === 'estado') applyDelta(st, msg.data);
+});
+
+ipcMain.handle('launcher:hunt', async (event, payload) => {
+  if (!isChrome(event.sender)) return { ok: false, error: 'origem invalida' };
+  const slot = registry.get(payload?.id);
+  if (!slot) return { ok: false, error: 'sessao inexistente' };
+  const st = huntStates.get(slot.id);
+  const enabled = Boolean(st?.enabled);
+  const wc = slot.view?.webContents;
+  // Ligado mas sem snapshot (ex.: painel aberto antes de o main ver o welcome):
+  // pede ao hook para reenviar o ultimo que a pagina ja tem.
+  if (enabled && !st.ready && wc && !wc.isDestroyed() && matchesGame(wc.getURL())) {
+    try {
+      wc.send('dex:get');
+    } catch {
+      /* ponte ausente: o proximo poll tenta de novo */
+    }
+  }
+  if (!enabled || !st.ready) {
+    return { ok: true, enabled, ready: false, view: null, missing: null };
+  }
+  // `ate meu nv`: a UI pede levelCap=true e o teto vira o nivel do treinador.
+  const levelCap = payload?.levelCap === true ? st.level ?? null : null;
+  return {
+    ok: true,
+    enabled: true,
+    ready: true,
+    trainerLevel: st.level,
+    view: huntView(st),
+    missing: catalogMissing(st, { limit: 300, levelCap }),
+  };
+});
+
+ipcMain.handle('launcher:dex-set', async (event, payload) => {
+  if (!isChrome(event.sender)) return { ok: false, error: 'origem invalida' };
+  const slot = registry.get(payload?.id);
+  if (!slot) return { ok: false, error: 'sessao inexistente' };
+  const on = payload?.on === true;
+  const wc = slot.view?.webContents;
+  if (!wc || wc.isDestroyed() || !matchesGame(slot.url)) return { ok: false, error: 'sessao nao-e-jogo' };
+  // O flag vive no localStorage DA ORIGEM do jogo; se a aba estiver num provedor
+  // OAuth, nao e o lugar certo — espera voltar.
+  if (!matchesGame(wc.getURL())) return { ok: false, error: 'a sessao nao esta no jogo agora' };
+  // Ligar so funciona se o hook estiver instalado naquela sessao. Um slot criado
+  // em URL nao-jogo nunca recebeu a extensao; instala aqui (WeakSet = idempotente).
+  if (on) {
+    if (!dexHookDir) return { ok: false, error: 'extensao do painel indisponivel' };
+    await installDexHook(wc.session, dexHookDir).catch((err) => console.error(`[${slot.id}] dex-hook:`, err.message));
+  }
+  try {
+    await withTimeout(wc.executeJavaScript(dexFlagExpr(on), false), INJECT_TIMEOUT_MS, 'dex-opt-in');
+  } catch (err) {
+    return { ok: false, error: err?.message ?? 'a pagina nao respondeu' };
+  }
+  // O estado do main passa a ser a autoridade do opt-in: ao desligar, o gate do
+  // 'hunt:state' ignoras os deltas que o hook ainda mandar deste documento —
+  // desligar desliga de verdade, sem esperar recarga.
+  const st = createHuntState();
+  st.enabled = on;
+  huntStates.set(slot.id, st);
+  if (on) {
+    try {
+      wc.reload();
+    } catch (err) {
+      console.error(`[${slot.id}] recarga para ativar a leitura falhou:`, err.message);
+    }
+  }
+  sendState();
+  return { ok: true, on };
 });
 
 ipcMain.handle('diagnostics:collect', async (event) => {
@@ -670,6 +800,12 @@ app.whenReady().then(async () => {
     wireAddonPack();
   } catch (err) {
     console.error('[addons] pack/preload indisponivel:', err.message);
+  }
+  try {
+    dexHookDir = await buildDexHook(path.join(app.getPath('userData'), 'dexhook'));
+    registry.dexHookDir = dexHookDir;
+  } catch (err) {
+    console.error('[dexhook] extensao do painel de caca indisponivel:', err.message);
   }
   warmExtensionCache().catch((err) =>
     console.error('[extensions] download em segundo plano:', err.message)

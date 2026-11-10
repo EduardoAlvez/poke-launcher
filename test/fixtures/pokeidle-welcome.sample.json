@@ -1,0 +1,121 @@
+{
+  "_nota": "Fixture ANONIMIZADO do welcome do pokeidle.io (Fase 9). Campos pessoais removidos (nick/id/ouro/time/itens) e TODAS as contagens k/c/balls foram perturbadas para valores falsos — a estrutura real (v1.414.x, 2026-11-10) e que importa para o parser, nao o progresso de ninguem.",
+  "t": "welcome",
+  "hunts": [
+    {
+      "slug": "magma_magcargo",
+      "nome": "Magma Magcargo",
+      "area": "outland",
+      "nivel": 150,
+      "especies": [
+        {
+          "pokeId": 2053,
+          "nome": "Magma Magcargo",
+          "pontos": 15
+        }
+      ],
+      "totalSpawns": 15,
+      "regiao": "outland",
+      "pixel": [
+        95,
+        368
+      ],
+      "looktype": 60219
+    },
+    {
+      "slug": "caterpie",
+      "nome": "Caterpie",
+      "area": "kanto",
+      "nivel": 1,
+      "especies": [
+        {
+          "pokeId": 10,
+          "nome": "Caterpie",
+          "pontos": 15
+        }
+      ],
+      "totalSpawns": 15
+    },
+    {
+      "slug": "weedle",
+      "nome": "Weedle",
+      "area": "kanto",
+      "nivel": 1,
+      "especies": [
+        {
+          "pokeId": 13,
+          "nome": "Weedle",
+          "pontos": 15
+        }
+      ],
+      "totalSpawns": 15
+    }
+  ],
+  "estado": {
+    "level": 120,
+    "huntSlug": "magma_magcargo",
+    "outlandTier": 1,
+    "balls": {
+      "1": 8,
+      "4": 42
+    },
+    "pokedex": {
+      "8": {
+        "k": 1,
+        "c": 1
+      },
+      "9": {
+        "k": 2,
+        "c": 1
+      },
+      "37": {
+        "k": 30,
+        "c": 0
+      },
+      "50": {
+        "k": 40,
+        "c": 0
+      },
+      "74": {
+        "k": 12,
+        "c": 0
+      },
+      "75": {
+        "k": 22,
+        "c": 0
+      },
+      "76": {
+        "k": 11,
+        "c": 0
+      },
+      "95": {
+        "k": 60,
+        "c": 2
+      },
+      "111": {
+        "k": 3,
+        "c": 0
+      },
+      "112": {
+        "k": 20,
+        "c": 0
+      },
+      "2019": {
+        "k": 1,
+        "c": 0
+      },
+      "2020": {
+        "k": 2,
+        "c": 0
+      },
+      "2033": {
+        "k": 55,
+        "c": 0
+      },
+      "2053": {
+        "k": 1234,
+        "c": 0
+      }
+    }
+  }
+}
