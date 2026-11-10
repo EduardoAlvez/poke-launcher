@@ -35,7 +35,7 @@ function isRatio(value) {
 
 export function parseSlot(raw) {
   if (!raw || typeof raw !== 'object') return { ok: false, error: 'slot nao e objeto' };
-  const { id, name, url, partition, ratios, muted, zoomFactor, automation, lightMode, eco } = raw;
+  const { id, name, url, partition, ratios, muted, zoomFactor, automation, lightMode, eco, dexWatch } = raw;
   if (typeof id !== 'string' || !SLOT_ID.test(id)) {
     return { ok: false, error: `id invalido: ${JSON.stringify(id)}` };
   }
@@ -56,6 +56,7 @@ export function parseSlot(raw) {
     zoomFactor: typeof zoomFactor === 'number' && zoomFactor > 0 && zoomFactor <= 3 ? zoomFactor : 1,
     lightMode: lightMode === true,
     eco: eco === true,
+    dexWatch: dexWatch === true,
     automation: parseAutomation(automation),
   };
   return { ok: true, slot };
@@ -181,6 +182,7 @@ export function buildSnapshot(previous, slots) {
         zoomFactor: s.zoomFactor ?? 1,
         lightMode: s.lightMode === true,
         eco: s.eco === true,
+        dexWatch: s.dexWatch === true,
         automation: s.automation ?? null,
       };
     }),

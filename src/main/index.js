@@ -350,6 +350,7 @@ async function restoreSlots() {
         created.zoomFactor = slot.zoomFactor;
         created.lightMode = slot.lightMode === true;
         created.eco = slot.eco === true;
+        created.dexWatch = slot.dexWatch === true;
         registry.applySlotPrefs(created);
         if (slot.automation) {
           created.automation = { ...slot.automation, enabled: false };
@@ -365,10 +366,27 @@ async function restoreSlots() {
   }
 }
 
+/**
+ * Nome padrao quando ninguem digita nada: "Conta 1", "Conta 2"... sequencial e
+ * sem colidir com as contas ja abertas. A UI ja preenche o campo; isto cobre
+ * o resto dos caminhos (e o botao de criar conta em modo rapido).
+ */
+function nomePadraoConta() {
+  const usados = new Set(registry.slots.map((s) => (s.name || '').trim().toLowerCase()));
+  let maior = 0;
+  for (const s of registry.slots) {
+    const m = /^conta\s*(\d+)$/i.exec((s.name || '').trim());
+    if (m) maior = Math.max(maior, Number(m[1]));
+  }
+  let n = maior + 1;
+  while (usados.has(`conta ${n}`)) n += 1;
+  return `Conta ${n}`;
+}
+
 ipcMain.handle('launcher:add-slot', async (event, payload) => {
   if (!isChrome(event.sender)) return;
   const { url } = payload ?? {};
-  const name = String(payload?.name ?? '').slice(0, 24);
+  const name = String(payload?.name ?? '').trim().slice(0, 24) || nomePadraoConta();
   let parsed;
   try {
     parsed = new URL(url || 'https://pokeidle.io/app');
@@ -634,9 +652,28 @@ ipcMain.handle('launcher:hunt', async (event, payload) => {
   if (!isChrome(event.sender)) return { ok: false, error: 'origem invalida' };
   const slot = registry.get(payload?.id);
   if (!slot) return { ok: false, error: 'sessao inexistente' };
-  const st = huntStates.get(slot.id);
-  const enabled = Boolean(st?.enabled);
+  let st = huntStates.get(slot.id);
   const wc = slot.view?.webContents;
+  // Sem estado (app recem-aberto, ou sessao recriada): pergunta a PAGINA se o
+  // opt-in esta ligado — o flag vive no localStorage da particao, e o hook de la
+  // ja esta embrulhando o socket. Sem esta adocao, o launcher diria "desligado"
+  // e ainda poria fora o welcome que o hook mandasse.
+  if (!st && wc && !wc.isDestroyed() && matchesGame(wc.getURL())) {
+    const ligado = await withTimeout(
+      wc.executeJavaScript(
+        `(() => { try { return localStorage.getItem('pokeLauncherDex') === '1'; } catch (e) { return false; } })()`,
+        false
+      ),
+      3000,
+      'dex-flag'
+    ).catch(() => false);
+    if (ligado === true) {
+      st = createHuntState();
+      st.enabled = true;
+      huntStates.set(slot.id, st);
+    }
+  }
+  const enabled = Boolean(st?.enabled);
   // Ligado mas sem snapshot (ex.: painel aberto antes de o main ver o welcome):
   // pede ao hook para reenviar o ultimo que a pagina ja tem.
   if (enabled && !st.ready && wc && !wc.isDestroyed() && matchesGame(wc.getURL())) {
@@ -686,6 +723,8 @@ ipcMain.handle('launcher:dex-set', async (event, payload) => {
   // 'hunt:state' ignoras os deltas que o hook ainda mandar deste documento —
   // desligar desliga de verdade, sem esperar recarga.
   if (!on) route.stop(slot.id, 'dex-desligada').catch(() => {});
+  slot.dexWatch = on;
+  await persist().catch((err) => console.error('[dex] nao consegui gravar o opt-in:', err.message));
   const st = createHuntState();
   st.enabled = on;
   huntStates.set(slot.id, st);
@@ -909,6 +948,43 @@ app.on('web-contents-created', (_e, contents) => {
     const slot = registry.findByWebContentsId(id);
     return slot && slot.view.webContents === contents ? slot : null;
   };
+  /**
+   * O opt-in da leitura vive em DOIS lugares: no main (slots.json, `dexWatch`)
+   * e no localStorage da pagina (o hook so pode ler isso no document_start).
+   * Uma escrita perdida (crash/kill forcado) deixaria o hook desligado e o
+   * launcher sem dados. Aqui reasseguramos o flag a cada carga e, se o hook
+   * mesmo assim nao viu o welcome (porque faltou no document_start), recarrega
+   * UMA vez — com o flag ja no lugar, a carga seguinte pega o welcome.
+   */
+  const dexSelfHeal = new Set();
+  contents.on('dom-ready', () => {
+    const slot = isSlotView(contents.id);
+    if (!slot || slot.dexWatch !== true) return;
+    if (!matchesGame(contents.getURL())) return;
+    const st = huntStates.get(slot.id) ?? createHuntState();
+    st.enabled = true;
+    huntStates.set(slot.id, st);
+    contents
+      .executeJavaScript(dexFlagExpr(true), false)
+      .then(() => {
+        contents.send('dex:get'); // o hook devolve o ultimo welcome que ele viu
+        setTimeout(() => {
+          const cur = huntStates.get(slot.id);
+          if (cur?.ready || dexSelfHeal.has(slot.id)) return;
+          contents
+            .executeJavaScript(`!!document.querySelector('#hud-hunt')`, false)
+            .then((logado) => {
+              // so recarrega se a conta esta logada (ou seja: DEVERIA ter vindo welcome)
+              if (!logado || dexSelfHeal.has(slot.id)) return;
+              dexSelfHeal.add(slot.id);
+              console.error(`[dex] ${slot.id}: hook nao viu o welcome; recarregando uma vez`);
+              contents.reload();
+            })
+            .catch(() => {});
+        }, 4000);
+      })
+      .catch(() => {});
+  });
   contents.ipc?.on('game-event', (_event, payload) => {
     const slot = registry.findByWebContentsId(contents.id);
     if (!slot) return;

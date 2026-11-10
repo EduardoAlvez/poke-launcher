@@ -289,6 +289,21 @@ test('parseSlot: eco e por sessao e desligado por padrao', () => {
   assert.equal(parseSlot({ ...validSlot, eco: 'sim' }).slot.eco, false);
 });
 
+test('parseSlot: dexWatch (opt-in da leitura da dex) e booleano e por sessao', () => {
+  assert.equal(parseSlot(validSlot).slot.dexWatch, false);
+  assert.equal(parseSlot({ ...validSlot, dexWatch: true }).slot.dexWatch, true);
+  assert.equal(parseSlot({ ...validSlot, dexWatch: 'sim' }).slot.dexWatch, false);
+});
+
+test('buildSnapshot preserva o opt-in da leitura da dex', async () => {
+  const { buildSnapshot } = await import('../src/main/store.js');
+  const anterior = { schemaVersion: 1, maxSlots: 2, slots: [], scripts: [] };
+  const snap = buildSnapshot(anterior, [{ id: 'slot-1', name: 'A', url: 'https://pokeidle.io/app', dexWatch: true }]);
+  assert.equal(snap.slots[0].dexWatch, true);
+  const sem = buildSnapshot(anterior, [{ id: 'slot-2', name: 'B', url: 'https://pokeidle.io/app' }]);
+  assert.equal(sem.slots[0].dexWatch, false);
+});
+
 test('buildSnapshot preserva eco e a lista de scripts', async () => {
   const { buildSnapshot } = await import('../src/main/store.js');
   const previous = { schemaVersion: 1, maxSlots: 2, slots: [], scripts: [validScript] };

@@ -93,7 +93,7 @@ test('com opt-in, o WebSocket do jogo e embrulado e o welcome chega na ponte iso
   const env = makeWindow({ flag: '1' });
   installHook(env);
   assert.notEqual(env.win.WebSocket, env.RealWS);
-  assert.equal(env.win.__pokeLauncherDexHook, true);
+  assert.equal(env.win.__pokeLauncherDexHook.installed, true);
   const ready = env.posted.find((p) => p.msg.t === 'ready');
   assert.ok(ready, 'anuncia ready ao instalar');
   const socket = new env.win.WebSocket('wss://pokeidle.io/socket');
@@ -102,6 +102,9 @@ test('com opt-in, o WebSocket do jogo e embrulado e o welcome chega na ponte iso
   assert.ok(wel, 'welcome reencaminhado');
   assert.equal(wel.msg.data.t, 'welcome');
   assert.equal(wel.origin, 'https://pokeidle.io');
+  // o marcador de diagnostico prova que o hook VIU o frame (e nao so instalou)
+  assert.equal(env.win.__pokeLauncherDexHook.welcome, true);
+  assert.equal(env.win.__pokeLauncherDexHook.frames, 1);
 });
 
 test('so observa socket do proprio jogo; socket estranho passa batido', () => {

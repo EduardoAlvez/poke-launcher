@@ -20,7 +20,8 @@
   }
   if (!enabled) return;
   if (window.__pokeLauncherDexHook) return;
-  window.__pokeLauncherDexHook = true;
+  // marcador de diagnostico: "instalado" nao prova que o welcome chegou
+  window.__pokeLauncherDexHook = { installed: true, welcome: false, frames: 0, lastFrame: null };
 
   const RealWS = window.WebSocket;
   if (!RealWS) return;
@@ -57,8 +58,14 @@
         return;
       }
       const t = msg && typeof msg.t === 'string' ? msg.t : null;
+      const hook = window.__pokeLauncherDexHook;
+      if (hook) {
+        hook.frames += 1;
+        hook.lastFrame = t;
+      }
       if (t === 'welcome') {
         lastWelcome = msg;
+        if (hook) hook.welcome = true;
         post('welcome', msg);
       } else if (t === 'estado') {
         post('estado', msg);

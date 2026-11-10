@@ -131,6 +131,7 @@ export class SlotRegistry {
       crashes: [],
       lightMode: false,
       eco: false,
+      dexWatch: false,
       lightApplied: false,
       lightFailed: false,
       lightCssKey: null,
