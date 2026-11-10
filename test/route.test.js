@@ -162,11 +162,11 @@ function markerEl(nome) {
   return el;
 }
 
-function fakeDoc({ tabs, markersByTab, hudPokeId, caidos, mapaAberto: aberto = true }) {
+function fakeDoc({ tabs, markersByTab, hudPokeId, caidos, mapaAberto: aberto = true, fechaAoViajar = false, mapaNaoAbre = false }) {
   const mapaBtn = { textContent: 'Mapa', disabled: false, _clicks: 0 };
   mapaBtn.click = () => {
     mapaBtn._clicks += 1;
-    aberto = true;
+    if (!mapaNaoAbre) aberto = true;
   };
   let abaAtual = tabs[0];
   const abas = tabs.map((t) => {
@@ -186,6 +186,8 @@ function fakeDoc({ tabs, markersByTab, hudPokeId, caidos, mapaAberto: aberto = t
         markers[`${t}|${slug}`] = m;
       }
   const hud = { dataset: { pokeId: hudPokeId } };
+  const bola = { className: 'caidos-bola on' };
+  bola.getAttribute = () => `Ultra Ball — você tem ${caidos?.bolas ?? 1547}`;
   const caido = { _clicks: 0, querySelector: () => ({ textContent: caidos?.nome || '' }) };
   caido.click = () => {
     caido._clicks += 1;
@@ -193,9 +195,18 @@ function fakeDoc({ tabs, markersByTab, hudPokeId, caidos, mapaAberto: aberto = t
   const doc = {
     defaultView: null,
     querySelector: (sel) => {
-      if (sel === '.mapa-reg-bt.on') return aberto ? abas.find((a) => a.dataset.regiao === abaAtual) : null;
+      if (sel === '.mapa-reg-bt.on') {
+        // como o jogo real: mapa fechado deixa a aba .on ORFA no DOM, invisivel
+        const el = abas.find((a) => a.dataset.regiao === abaAtual);
+        if (el) {
+          el.className = `mapa-reg-bt on${aberto ? '' : ' oculta'}`;
+          el.hidden = !aberto;
+        }
+        return el || null;
+      }
       if (sel === '#hud-hunt') return hud;
-      const m = /^button\.marcador\[data-slug="([^"]+)"\], \.marcador\[data-slug="([^"]+)"\]$/.exec(sel);
+      if (sel === '#caidos-bolas .caidos-bola.on') return bola;
+      const m = /marcador\[data-slug="([^"]+)"\]/.exec(sel);
       if (m) {
         const el = markers[`${abaAtual}|${m[1]}`] ?? null;
         if (el) el.hidden = !aberto; // jogo fecha o mapa mas deixa o DOM montado
@@ -205,12 +216,22 @@ function fakeDoc({ tabs, markersByTab, hudPokeId, caidos, mapaAberto: aberto = t
     },
     querySelectorAll: (sel) => {
       if (sel === 'button,[role=button]') return [mapaBtn];
-      if (sel === '.mapa-reg-bt') return abas;
+      if (sel === '.mapa-reg-bt') return abas.map((a) => ((a.hidden = !aberto), a));
       if (sel === '#caidos-lista .caido') return caidos?.present ? [caido] : [];
       return [];
     },
-    _probe: { mapaBtn, abas, markers, hud, caido },
+    _probe: { mapaBtn, abas, markers, hud, caido, bola, aberto: () => aberto },
   };
+  if (fechaAoViajar) {
+    // o jogo fecha o mapa ao escolher um destino: a maquina precisa reabrir
+    for (const mk of Object.values(markers)) {
+      const antes = mk.click;
+      mk.click = () => {
+        aberto = false;
+        antes();
+      };
+    }
+  }
   return doc;
 }
 
@@ -398,5 +419,104 @@ test('maquina: deadline ABSOLUTO por alvo mesmo com HUD oscilando (travel<->hunt
   win.flush(); // hunt de novo, mas o deadline ABSOLUTO (121k) venceu (agora 151k)
   const states = emits.map((e) => e.state);
   assert.ok(states.includes('skip-tempo'), states.join(','));
+  assert.equal(api.isRunning(), false);
+});
+
+// O bug do primeiro fogo real (2026-11-10): o jogo fecha o mapa ao viajar mas
+// deixa a ultima aba `.on` no DOM. mapaAberto() que so olha presenca achava
+// que o mapa estava aberto, nunca reabria e travava em 'procurando-regiao'.
+test('maquina: mapa fechou com aba .on ORFA -> reabre sozinho e segue (bug do fogo real)', () => {
+  nowMs = 1000;
+  const doc = fakeDoc({
+    tabs: ['kanto', 'johto'],
+    markersByTab: { a: { tab: 'kanto' }, b: { tab: 'johto' } },
+    hudPokeId: '99',
+    caidos: { nome: 'B', present: true },
+    fechaAoViajar: true,
+  });
+  const win = fakeWin();
+  const emits = [];
+  const api = globalThis.PokeRoute.installRoute({
+    config: {
+      enabled: true,
+      targets: [
+        { pokeId: 1, slug: 'a', nome: 'A' },
+        { pokeId: 2, slug: 'b', nome: 'B' },
+      ],
+    },
+    pack: PACK,
+    emit: (e) => emits.push(e),
+    doc,
+    win,
+    now,
+  });
+  win.flush(); // alvo A: marcador visivel -> viajando (mapa fecha)
+  assert.equal(doc._probe.aberto(), false);
+  doc._probe.hud.dataset.pokeId = '1';
+  win.flush(); // hunt A -> avanca via advance do main
+  api.advance();
+  // alvo B esta em JOHTO, mapa fechou: precisa reabrir (bug o nos prendia aqui)
+  for (let n = 0; n < 8; n += 1) win.flush();
+  const states = emits.map((e) => e.state);
+  assert.ok(states.includes('abrindo-mapa'), states.join(','));
+  assert.ok(doc._probe.mapaBtn._clicks >= 1, 'clicou Mapa de novo');
+  assert.ok(doc._probe.aberto(), 'mapa reabriu');
+  doc._probe.hud.dataset.pokeId = '2';
+  for (let n = 0; n < 4; n += 1) win.flush();
+  assert.ok(emits.some((e) => e.state === 'arremessando' && e.index === 1), 'chegou e arremessou no B');
+  assert.equal(api.isRunning(), true);
+});
+
+test('maquina: sem conseguir abrir o mapa, tenta N vezes bounded e pula o alvo', () => {
+  nowMs = 1000;
+  const doc = fakeDoc({
+    tabs: ['kanto', 'johto'],
+    markersByTab: { a: { tab: 'johto' } },
+    hudPokeId: '99',
+    caidos: { present: false },
+    mapaAberto: false,
+    mapaNaoAbre: true,
+  });
+  const win = fakeWin();
+  const emits = [];
+  const api = globalThis.PokeRoute.installRoute({
+    config: { enabled: true, targets: [{ pokeId: 1, slug: 'a', nome: 'A' }] },
+    pack: PACK,
+    emit: (e) => emits.push(e),
+    doc,
+    win,
+    now,
+  });
+  for (let n = 0; n < 60 && api.isRunning(); n += 1) win.flush();
+  const states = emits.map((e) => e.state);
+  assert.ok(states.includes('skip-marcador'), states.join(','));
+  assert.equal(api.isRunning(), false);
+  assert.ok(doc._probe.mapaBtn._clicks < 60, 'nao clicou Mapa para sempre');
+});
+
+test('maquina: bolas zero no DOM param a rota na hora (espelho do welcome nao vale)', () => {
+  nowMs = 1000;
+  const doc = fakeDoc({
+    tabs: ['kanto'],
+    markersByTab: { a: { tab: 'kanto' } },
+    hudPokeId: '1', // ja na area do alvo
+    caidos: { nome: 'A', present: true, bolas: 0 },
+  });
+  const win = fakeWin();
+  const emits = [];
+  const api = globalThis.PokeRoute.installRoute({
+    config: { enabled: true, targets: [{ pokeId: 1, slug: 'a', nome: 'A' }] },
+    pack: PACK,
+    emit: (e) => emits.push(e),
+    doc,
+    win,
+    now,
+  });
+  win.flush(); // hunt: le bolas do titulo da bola e ve 0 -> para tudo
+  const ultimo = emits[emits.length - 1];
+  assert.equal(ultimo.state, 'sem-bolas');
+  assert.equal(ultimo.running, false);
+  assert.equal(ultimo.balls, 0, 'status carrega o balls lido do DOM');
+  assert.equal(doc._probe.caido._clicks, 0, 'nao gastou o ultimo arremesso');
   assert.equal(api.isRunning(), false);
 });

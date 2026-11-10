@@ -688,8 +688,10 @@ function renderRouteStatus(st) {
   }
   parts.push(`${st.captured ?? 0} capturada(s)`);
   parts.push(`${st.throws ?? 0} arremesso(s)`);
-  const bolas = bolasTotais(lastBalls);
-  if (bolas !== null) parts.push(`~${bolas} bolas`);
+  // o balls VIVO vem da rota (pagina le o titulo da bola no DOM); o espelho do
+  // welcome congela porque o jogo nao manda balls nos deltas — usar so como fallback
+  const bolas = Number.isFinite(st.balls) ? st.balls : bolasTotais(lastBalls);
+  if (bolas !== null && bolas !== undefined) parts.push(`${bolas} bolas`);
   routeStatus.textContent = `Rota: ${parts.join(' · ')}`;
 }
 

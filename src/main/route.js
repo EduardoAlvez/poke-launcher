@@ -44,6 +44,7 @@ export class RouteController {
       targetNome: run.targets[run.index]?.nome ?? null,
       throws: run.throws,
       captured: run.captured,
+      balls: run.balls,
       startedAt: run.startedAt,
     };
   }
@@ -75,6 +76,7 @@ export class RouteController {
       baselineC: this.baselineFor(st, slim[0]),
       throws: 0,
       captured: 0,
+      balls: st.balls ? Object.values(st.balls).reduce((s, n) => s + (Number(n) || 0), 0) : null,
       startedAt: Date.now(),
       lastPayload: { config, pack: opts.pack || {} },
     });
@@ -160,6 +162,9 @@ export class RouteController {
     }
     if (Number.isFinite(msg.throws)) run.throws = msg.throws;
     if (Number.isFinite(msg.captured)) run.captured = msg.captured;
+    // o balls vem da PAGINA (le o titulo da bola selecionada no DOM): o
+    // espelho do welcome congela porque o jogo nao manda balls nos deltas.
+    if (Number.isFinite(msg.balls)) run.balls = msg.balls;
     if (typeof msg.state === 'string' && msg.state.length <= 40) run.state = msg.state;
     if (msg.running === false) run.running = false;
     this.onChange();

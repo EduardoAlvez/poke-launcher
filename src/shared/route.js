@@ -38,8 +38,29 @@
     let stopped = false;
     let timer = null;
     let lastEmit = '';
+    let bolas = null; // lido do DOM em tempo real: o espelho estado.balls NAO chega nos deltas
 
     const target = () => targets[i] || null;
+
+    // O jogo mostra a bola selecionada como "… voce tem 1.547". Ler daqui e o
+    // unico termometro honesto do gasto: o welcome traz balls mas o jogo nao o
+    // reenvia nos deltas de estado (confirmado no fogo real 2026-11-10), entao
+    // o espelho do main congela. Sem isto, "parar quando zerar" nao funciona.
+    const lerBolas = () => {
+      try {
+        const el =
+          doc.querySelector(r.ballSelected || '#caidos-bolas .caidos-bola.on') ||
+          doc.querySelector('.caidos-bola.on');
+        if (!el) return bolas;
+        const bruto = String(el.getAttribute?.('title') || '');
+        const m = /([\d.]+)\s*$/.exec(bruto.trim());
+        if (!m) return bolas;
+        const n = Number(m[1].replace(/\./g, ''));
+        return Number.isFinite(n) && n >= 0 ? Math.floor(n) : bolas;
+      } catch {
+        return bolas;
+      }
+    };
 
     const emitStatus = (state) => {
       const key = `${state}|${i}|${throwsTotal}|${captured}`;
@@ -54,6 +75,7 @@
         target: target()?.nome || null,
         throws: throwsTotal,
         captured,
+        balls: bolas,
       });
     };
 
@@ -83,6 +105,7 @@
         target: targets[i]?.nome || null,
         throws: throwsTotal,
         captured,
+        balls: bolas,
       });
     };
 
@@ -99,7 +122,11 @@
 
     const mapaAberto = () => {
       try {
-        return Boolean(doc.querySelector('.mapa-reg-bt.on'));
+        const ativa = doc.querySelector('.mapa-reg-bt.on');
+        // mapa FECHADO deixa a ultima aba com `.on` no DOM (retangulo zero):
+        // sem checar visibilidade, a maquina achava que o mapa estava aberto,
+        // nunca o reabria e travava em 'procurando-regiao' para sempre.
+        return Boolean(ativa && (!PA || PA.isClickable(ativa, doc)));
       } catch {
         return false;
       }
@@ -135,13 +162,16 @@
     const marcadorCapturado = (el) => /(?:^|\s)capturado(?:\s|$)/.test(String(el?.className || ''));
 
     const trocarAba = () => {
+      // SEMPRE conta a tentativa, inclusive quando nao ha aba clicavel: e
+      // justamente o caso (mapa fechado, abas invisiveis) que nao pode virar
+      // laco sem saida — o tabTries>24 e a unica fuga do ramo travel.
+      tabTries += 1;
       try {
         const tabs = [...doc.querySelectorAll('.mapa-reg-bt')].filter((t) => !PA || PA.isClickable(t, doc));
         if (!tabs.length) return false;
         const atual = tabs.findIndex((t) => t.className.includes('on'));
         const prox = tabs[(Math.max(atual, 0) + 1) % tabs.length];
         prox.click();
-        tabTries += 1;
         return true;
       } catch {
         return false;
@@ -193,8 +223,13 @@
             emitStatus('sem-captura');
             return nextTarget('skip-tempo');
           }
+          bolas = lerBolas();
           const caido = caidoDoAlvo(t.nome);
           if (caido) {
+            if (bolas === 0) {
+              emitStatus('sem-bolas');
+              return finish('sem-bolas');
+            }
             if (maxBolas !== null && throwsTarget >= maxBolas) {
               emitStatus('sem-orcamento');
               return nextTarget('skip-bolas');
@@ -233,6 +268,7 @@
           return schedule();
         }
         if (!mapaAberto()) {
+          tabTries += 1; // abrir mapa que falha (botao sumiu) tambem tem de ter fuga
           abrirMapa();
           emitStatus('abrindo-mapa');
           return schedule();

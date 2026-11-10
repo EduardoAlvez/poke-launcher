@@ -109,9 +109,9 @@ até capturar — então passa ao próximo alvo da fila (ordem por nível/XP/reg
 - É **automação completa**: os mesmos riscos da seção de Automação acima, com comportamento mais robusto
   de bot (viagem + captura em série). Detectável em princípio; o risco de ban é seu.
 - **Custo real de bolas**: capturar espécies novas pode exigir centenas/milhares de arremessos por
-  espécie. Sem limite, a rota usa suas bolas até acabarem — o painel mostra o estoque que o jogo
-  reportou na conexão, e a rota é interrompida quando ele zerar **se o jogo mantiver esse número
-  atualizado ao vivo** (na primeira corrida, acompanhe o contador; comece com poucos alvos).
+  espécie. A rota lê o estoque da bola selecionada direto no DOM a cada arremesso e **para quando ele
+  zera** (o `welcome` do jogo congela esse número, então não confiaríamos nele). Ainda assim, comece
+  com poucos alvos.
 - A rota **não escreve no socket**: cada passo é clique de usuário simulado no DOM, como o AUTO já faz;
   a confirmação de captura vem do delta real da dex (a leitura do painel precisa estar ligada).
 - Botão **Parar rota** no painel, **Parar automações** na toolbar/bandeja também derruba a rota, e o
