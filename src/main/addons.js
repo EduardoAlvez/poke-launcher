@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const ENGINE_PATH = path.join(dirname, '../shared/engine.js');
 const AUTOMATION_PATH = path.join(dirname, '../shared/automation.js');
+const ROUTE_PATH = path.join(dirname, '../shared/route.js');
 const GLUE_PATH = path.join(dirname, '../preload/addon.cjs');
 const PACK_PATH = path.join(dirname, 'rules/pokeidle.json');
 const AUTOMATION_PACK_PATH = path.join(dirname, 'rules/automation-pokeidle.json');
@@ -123,14 +124,15 @@ export async function auditPack(contents, pack, { warn = console.warn } = {}) {
 }
 
 export async function buildAddonPreload(targetDir) {
-  const [engine, automation, glue] = await Promise.all([
+  const [engine, automation, route, glue] = await Promise.all([
     fs.readFile(ENGINE_PATH, 'utf8'),
     fs.readFile(AUTOMATION_PATH, 'utf8'),
+    fs.readFile(ROUTE_PATH, 'utf8'),
     fs.readFile(GLUE_PATH, 'utf8'),
   ]);
   await fs.mkdir(targetDir, { recursive: true });
   const file = path.join(targetDir, 'addon.cjs');
-  await fs.writeFile(file, `${engine}\n${automation}\n${glue}`, 'utf8');
+  await fs.writeFile(file, `${engine}\n${automation}\n${route}\n${glue}`, 'utf8');
   return file;
 }
 

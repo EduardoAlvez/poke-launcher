@@ -205,6 +205,7 @@ export function catalogMissing(state, { limit = 300, levelCap = null } = {}) {
       }
       missing.push({
         pokeId: e.pokeId,
+        slug: hunt.slug,
         nome: e.nome,
         area: hunt.area,
         huntNome: hunt.nome || hunt.slug,
@@ -242,6 +243,7 @@ export function huntView(state) {
       : null,
     faltam,
     tem,
+    balls: state.balls,
     progress: dexProgress(state),
     warnings: state.warnings,
   };

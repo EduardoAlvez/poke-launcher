@@ -163,3 +163,39 @@ ipcRenderer.on('automation:config', (_event, payload) => {
     emit: (evt) => ipcRenderer.send('automation:status', evt),
   });
 });
+
+// ---- Rota "capturar um por um" (Fase 10) ----
+// A maquina (src/shared/route.js) clica: Mapa, aba de regiao, marcador, caido.
+// Quem diZ "capturou" e o MAIN (delta real da dex visto pelo hook) — por isso
+// existe o canal route:cmd/advance. A pagina nunca decide a verdade.
+let routeHandle = null;
+
+ipcRenderer.on('route:config', (_event, payload) => {
+  routeHandle?.stop?.('reconfigurado');
+  routeHandle = null;
+  const config = payload?.config ?? null;
+  if (!config?.enabled) {
+    console.log('[route] desativada');
+    return;
+  }
+  const route = globalThis.PokeRoute;
+  if (!route || typeof route.installRoute !== 'function') {
+    console.error('[route] motor ausente no preload');
+    return;
+  }
+  console.log(`[route] iniciando fila de ${config.targets?.length ?? 0} alvos`);
+  routeHandle = route.installRoute({
+    config,
+    pack: payload?.pack ?? {},
+    emit: (evt) => ipcRenderer.send('route:status', evt),
+  });
+});
+
+ipcRenderer.on('route:cmd', (_event, cmd) => {
+  if (cmd?.action === 'advance') {
+    routeHandle?.advance?.();
+  } else if (cmd?.action === 'stop') {
+    routeHandle?.stop?.('parado');
+    routeHandle = null;
+  }
+});

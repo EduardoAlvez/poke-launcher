@@ -337,6 +337,9 @@ function updateChip(view, s) {
   const age = enabled && s.autoLastTick ? Date.now() - s.autoLastTick : null;
   view.auto.dataset.stalled = age !== null && age > 20000 ? 'true' : 'false';
   view.auto.title = autoTitle(s);
+  view.chip.title = s.route?.running
+    ? `Rota de captura ativa: ${s.route.state || '...'} (alvo ${Math.min((s.route.index ?? 0) + 1, s.route.total ?? 1)}/${s.route.total ?? '?'} · ${s.route.captured ?? 0} capturadas)`
+    : '';
 }
 
 window.launcher.onRenameRequest(({ id }) => chipViews.get(id)?.rename?.());
@@ -631,8 +634,64 @@ const huntMissing = document.getElementById('hunt-missing');
 const huntMissingCount = document.getElementById('hunt-missing-count');
 const huntAreaList = document.getElementById('hunt-area-list');
 const huntProgress = document.getElementById('hunt-progress');
+const huntRoute = document.getElementById('hunt-route');
+const routeRisk = document.getElementById('route-risk');
+const routeAck = document.getElementById('route-ack');
+const routeOrdem = document.getElementById('route-ordem');
+const routeMax = document.getElementById('route-max');
+const routeStatus = document.getElementById('route-status');
+const routeMsg = document.getElementById('route-msg');
+const routeStart = document.getElementById('route-start');
+const routeStop = document.getElementById('route-stop');
 let huntTimer = null;
 let huntBusy = false;
+let cachedRouteRisk = '';
+let routeWasRunning = false;
+let lastBalls = null;
+
+function bolasTotais(balls) {
+  if (!balls || typeof balls !== 'object') return null;
+  const v = Object.values(balls).reduce((s, n) => s + (Number(n) || 0), 0);
+  return v;
+}
+
+function showRouteMsg(msg, isError) {
+  routeMsg.hidden = !msg;
+  routeMsg.textContent = msg;
+  if (msg) routeMsg.style.color = isError ? '#ff6b6b' : '#3fbf7f';
+}
+
+function renderRouteStatus(st) {
+  const running = st?.running === true;
+  routeStop.hidden = !running;
+  routeStart.hidden = running;
+  routeAck.disabled = running;
+  routeOrdem.disabled = running;
+  routeMax.disabled = running;
+  if (routeWasRunning && !running) {
+    // consentimento e por execucao: a fila acabou, o proximo fogo exige ack de novo
+    routeAck.checked = false;
+    routeStart.disabled = true;
+    routeAck.disabled = false;
+  } else if (!running) {
+    routeStart.disabled = !routeAck.checked;
+  }
+  routeWasRunning = running;
+  if (!st) {
+    routeStatus.hidden = true;
+    return;
+  }
+  routeStatus.hidden = false;
+  const parts = [st.state || 'parada'];
+  if (st.total) {
+    parts.push(`alvo ${Math.min((st.index ?? 0) + 1, st.total)}/${st.total}${st.targetNome ? ` (${st.targetNome})` : ''}`);
+  }
+  parts.push(`${st.captured ?? 0} capturada(s)`);
+  parts.push(`${st.throws ?? 0} arremesso(s)`);
+  const bolas = bolasTotais(lastBalls);
+  if (bolas !== null) parts.push(`~${bolas} bolas`);
+  routeStatus.textContent = `Rota: ${parts.join(' · ')}`;
+}
 
 function fillHuntSlots() {
   const prev = huntSlotSel.value;
@@ -675,12 +734,14 @@ function renderHunt(res) {
     huntStatus.hidden = false;
     huntStatus.textContent = (res && res.error) || 'Sem resposta do painel.';
     huntBody.hidden = true;
+    huntRoute.hidden = true;
     huntLevelcap.disabled = true;
     return;
   }
   if (!res.enabled) {
     huntEnable.checked = false;
     huntBody.hidden = true;
+    huntRoute.hidden = true;
     huntLevelcap.disabled = true;
     huntStatus.hidden = false;
     huntStatus.textContent =
@@ -690,6 +751,7 @@ function renderHunt(res) {
   if (!res.ready) {
     huntEnable.checked = true;
     huntBody.hidden = true;
+    huntRoute.hidden = true;
     huntLevelcap.disabled = true;
     huntStatus.hidden = false;
     huntStatus.textContent = 'Leitura ligada; recarreguei a aba. Os dados chegam quando o jogo conectar nesta conta.';
@@ -700,7 +762,10 @@ function renderHunt(res) {
   huntBody.hidden = false;
   huntLevelcap.disabled = !res.trainerLevel;
   huntLevelcapNv.textContent = res.trainerLevel ? `(≤ ${res.trainerLevel})` : '';
+  huntRoute.hidden = false;
   const view = res.view;
+  lastBalls = view.balls ?? null;
+  renderRouteStatus((lastSlots.find((s) => s.id === huntSlotSel.value) || {}).route);
   huntArea.textContent = view.current
     ? `Área atual: ${view.current.nome} · nível ${view.current.nivel} (${view.current.area})`
     : 'Sem área de caça reconhecida nesta sessão.';
@@ -743,6 +808,7 @@ async function loadHunt() {
 function openHunt() {
   huntModal.hidden = false;
   window.launcher.setViewsVisible(false);
+  loadRouteRisk();
   fillHuntSlots();
   loadHunt();
   huntTimer = setInterval(loadHunt, 2500);
@@ -787,6 +853,64 @@ huntEnable.addEventListener('change', async () => {
     loadHunt();
   }
 });
+
+routeAck.addEventListener('change', () => {
+  routeStart.disabled = !routeAck.checked;
+  if (routeAck.checked) showRouteMsg('', false);
+});
+
+routeStart.addEventListener('click', async () => {
+  const id = huntSlotSel.value;
+  if (!id) return;
+  routeStart.disabled = true;
+  try {
+    const res = await window.launcher.routeSet({
+      id,
+      on: true,
+      ackRisk: routeAck.checked,
+      ordem: routeOrdem.value,
+      maxAlvos: Number(routeMax.value) || 3,
+      levelCap: huntLevelcap.checked,
+    });
+    if (!res?.ok) {
+      showRouteMsg(res?.error || 'Não foi possível ligar a rota.', true);
+      routeStart.disabled = !routeAck.checked;
+    } else {
+      showRouteMsg('', false);
+    }
+    loadHunt();
+  } catch (err) {
+    showRouteMsg(err?.message || 'Falha ao ligar a rota.', true);
+    routeStart.disabled = !routeAck.checked;
+  }
+});
+
+routeStop.addEventListener('click', async () => {
+  const id = huntSlotSel.value;
+  if (!id) return;
+  routeStop.disabled = true;
+  try {
+    await window.launcher.routeSet({ id, on: false });
+  } catch {
+    /* o proximo poll mostra o estado real */
+  } finally {
+    routeStop.disabled = false;
+    loadHunt();
+  }
+});
+
+async function loadRouteRisk() {
+  if (cachedRouteRisk) {
+    routeRisk.textContent = cachedRouteRisk;
+    return;
+  }
+  try {
+    cachedRouteRisk = (await window.launcher.routeRisk()) || '';
+    routeRisk.textContent = cachedRouteRisk;
+  } catch {
+    routeRisk.textContent = 'Automatizar viola os Termos de Uso; o risco da rota é da sua conta.';
+  }
+}
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !huntModal.hidden) closeHunt();
 });

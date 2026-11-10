@@ -10,6 +10,7 @@ import { createTray } from './tray.js';
 import { loadPack, buildAddonPreload, applyPackCss, sendPackRules, loadAutomationPack, auditPack, collectSelectors, matchesGame } from './addons.js';
 import { LIGHT_SAMPLE_SCENE } from './light.js';
 import { AutomationController, RISK_TEXT } from './automation.js';
+import { RouteController, ROUTE_RISK_TEXT } from './route.js';
 import { warmExtensionCache } from './extensions.js';
 import { buildDexHook, installDexHook, dexFlagExpr } from './dex-hook.js';
 import { createHuntState, loadWelcome, applyDelta, huntView, catalogMissing } from './hunt-report.js';
@@ -87,6 +88,19 @@ const automation = new AutomationController({
   },
 });
 
+// Rota "capturar um por um" (Fase 10): fila/verdade no main, cliques na pagina.
+const route = new RouteController({
+  getSlot: (id) => registry.get(id),
+  getHuntState: (id) => huntStates.get(id),
+  sendToSlot: (slotId, channel, payload) => {
+    const slot = registry.get(slotId);
+    const wc = slot?.view?.webContents;
+    if (!wc || wc.isDestroyed()) return;
+    wc.send(channel, payload);
+  },
+  onChange: () => sendState(),
+});
+
 const notifier = new Notifier({
   show: ({ slotId, title, body }) => {
     if (!Notification.isSupported()) return;
@@ -109,6 +123,8 @@ const notifier = new Notifier({
 });
 
 registry.onCrash = (slot, info) => {
+  // O renderer da rota morreu com a view: a fila do main morre junto.
+  if (route.isActiveRunning(slot.id)) route.stop(slot.id, 'crash').catch(() => {});
   notifier.notify(slot.id, {
     type: 'session-crash',
     title: `${slot.name} caiu`,
@@ -165,11 +181,12 @@ function pushState() {
       autoTicks: s.automationStatus?.ticks ?? 0,
       autoLastTick: s.automationStatus?.lastTickAt ?? null,
       autoCaidos: s.automationStatus?.caidos ?? null,
+      route: route.publicState(s.id),
       popups: s.popups.length,
       crashedUntil: s.crashUntil && s.crashUntil > Date.now() ? s.crashUntil : 0,
     }))
   );
-  const anyAuto = registry.slots.filter((s) => s.automation?.enabled).length;
+  const anyAuto = registry.slots.filter((s) => s.automation?.enabled || route.isActiveRunning(s.id)).length;
   trayHandle?.setAutomationRunning?.(anyAuto);
 }
 
@@ -284,6 +301,10 @@ function wireAddonPack() {
       if (slot?.automation?.enabled) {
         contents.send('automation:config', { config: slot.automation, pack: automationPack });
       }
+      if (route.isActiveRunning(slot.id)) {
+        // a maquina da rota morreu junto com o documento anterior: reenvia a fila
+        route.resend(slot.id);
+      }
       if (!audited.has(contents.id)) {
         audited.add(contents.id);
         setTimeout(() => {
@@ -369,6 +390,7 @@ ipcMain.handle('launcher:remove-slot', async (event, payload) => {
   registry.remove(payload?.id);
   huntStates.delete(payload?.id);
   huntRate.delete(payload?.id);
+  route.clear(payload?.id);
   await persist();
   sendState();
 });
@@ -428,6 +450,8 @@ async function resetSlot(slot) {
   };
   try {
     for (const popup of [...slot.popups]) registry.closePopup(slot, popup);
+    // Rota em andamento morreria no meio da viagem com o reset: para limpo.
+    if (route.isActiveRunning(slot.id)) await route.stop(slot.id, 'reler-login');
     // Sair da pagina antes de limpar: requisicao ou WebSocket em voo pode
     // regravar o cookie de sessao depois do clearStorageData.
     if (!wc.isDestroyed()) await wc.loadURL('about:blank');
@@ -437,6 +461,7 @@ async function resetSlot(slot) {
     // da nova (o replay do get nem roda: ready continua true).
     huntStates.delete(slot.id);
     huntRate.delete(slot.id);
+    route.clear(slot.id);
     slot.loggedIn = false;
     await voltar();
     sendState();
@@ -602,6 +627,7 @@ ipcMain.on('hunt:state', (event, msg) => {
   if (!huntAllowed(slot.id, Date.now())) return;
   if (msg?.t === 'welcome') loadWelcome(st, msg.data);
   else if (msg?.t === 'estado') applyDelta(st, msg.data);
+  route.onHuntUpdate(slot.id, st);
 });
 
 ipcMain.handle('launcher:hunt', async (event, payload) => {
@@ -659,6 +685,7 @@ ipcMain.handle('launcher:dex-set', async (event, payload) => {
   // O estado do main passa a ser a autoridade do opt-in: ao desligar, o gate do
   // 'hunt:state' ignoras os deltas que o hook ainda mandar deste documento —
   // desligar desliga de verdade, sem esperar recarga.
+  if (!on) route.stop(slot.id, 'dex-desligada').catch(() => {});
   const st = createHuntState();
   st.enabled = on;
   huntStates.set(slot.id, st);
@@ -671,6 +698,29 @@ ipcMain.handle('launcher:dex-set', async (event, payload) => {
   }
   sendState();
   return { ok: true, on };
+});
+
+ipcMain.handle('launcher:route-set', async (event, payload) => {
+  if (!isChrome(event.sender)) return { ok: false, error: 'origem invalida' };
+  const slot = registry.get(payload?.id);
+  if (!slot) return { ok: false, error: 'sessao inexistente' };
+  if (payload?.on === true) {
+    const maxAlvos = Number(payload?.maxAlvos);
+    return route.start(slot.id, {
+      ackRisk: payload?.ackRisk === true,
+      ordem: ['facil', 'xp', 'regiao'].includes(payload?.ordem) ? payload.ordem : 'facil',
+      maxAlvos: Number.isInteger(maxAlvos) && maxAlvos >= 1 && maxAlvos <= 500 ? maxAlvos : 3,
+      levelCap: payload?.levelCap !== false,
+      maxBolas: Number.isFinite(payload?.maxBolas) && payload.maxBolas > 0 ? Math.floor(payload.maxBolas) : null,
+      pack: automationPack,
+    });
+  }
+  return route.stop(slot.id, 'desligada');
+});
+
+ipcMain.handle('route:risk-text', (event) => {
+  if (!isChrome(event.sender)) return '';
+  return ROUTE_RISK_TEXT;
 });
 
 ipcMain.handle('diagnostics:collect', async (event) => {
@@ -739,6 +789,7 @@ ipcMain.handle('automation:set', async (event, payload) => {
 ipcMain.handle('automation:stop-all', async (event) => {
   if (!isChrome(event.sender)) return false;
   await automation.stopAll();
+  await route.stopAll();
   sendState();
   return true;
 });
@@ -832,6 +883,7 @@ app.whenReady().then(async () => {
       isMuted: notifier.muted,
       onStopAutomation: () => {
         automation.stopAll();
+        route.stopAll();
         sendState();
       },
       onQuit: () => {
@@ -842,4 +894,47 @@ app.whenReady().then(async () => {
   } catch (err) {
     console.error('[boot] bandeja indisponivel:', err);
   }
+});
+
+// Pipes por webContents: eventos que sobem da pagina do jogo para o main. O
+// sender e sempre uma pagina NAO-confiavel — cada payload e re-parseado com
+// caps antes de tocar em estado/notificacao. Restaurado apos f3ff7f2 ter
+// derrubado estes listeners sem querer (toasts de captura e status do AUTO
+// ficaram mudos); o `route:status` e o `hunt:state` entraram ja no mesmo padrao.
+app.on('web-contents-created', (_e, contents) => {
+  contents.on('will-navigate', (event, url) => {
+    if (contents === win?.webContents && !url.startsWith('file:')) event.preventDefault();
+  });
+  const isSlotView = (id) => {
+    const slot = registry.findByWebContentsId(id);
+    return slot && slot.view.webContents === contents ? slot : null;
+  };
+  contents.ipc?.on('game-event', (_event, payload) => {
+    const slot = registry.findByWebContentsId(contents.id);
+    if (!slot) return;
+    const parsed = parseGameEvent(payload);
+    if (!parsed.ok) return;
+    notifier.notify(slot.id, parsed.event);
+  });
+  contents.ipc?.on('automation:status', (_event, payload) => {
+    const slot = registry.findByWebContentsId(contents.id);
+    if (!slot) return;
+    automation.reportStatus(slot.id, payload);
+    slot.automationStatus = payload;
+    sendState();
+    if (payload?.running === false && payload?.state === 'captured') {
+      automation
+        .markStopped(slot.id, 'captured')
+        .then((changed) => {
+          if (changed) sendState();
+        })
+        .catch((err) => console.error('[automation] parada pos-captura:', err.message));
+    }
+  });
+  contents.ipc?.on('route:status', (_event, payload) => {
+    const slot = isSlotView(contents.id);
+    if (!slot) return;
+    route.onStatus(slot.id, payload);
+    sendState();
+  });
 });

@@ -36,7 +36,8 @@ Baixe o instalador na página de releases:
 - **Modo leve por sessão** (`LEVE` no chip) — cena oculta e rAF limitado, sem parar a caça
   nem os lançamentos; pensado para notebook fraco.
 - **Painel de caça por sessão** (`Caça` na toolbar, opt-in e só leitura) — mostra a área atual,
-  o que a dex já tem e quais espécies faltam; veja o aviso abaixo.
+  o que a dex já tem e quais espécies faltam; e a **rota "capturar um por um"** (automação opt-in
+  que viaja e captura os faltantes em fila). Veja os avisos abaixo.
 
 ## Automação: leia antes de usar
 
@@ -55,6 +56,11 @@ Garantias de projeto (não de resultado):
 - sai do **Modo Economia** enquanto ativa (opção no modal): sem a cena o servidor não manda o campo
   e não existe alvo para lançar; ao parar, volta ao modo economia;
 - o kill switch interrompe em menos de 500 ms.
+
+Dois modos: **intervalo fixo** e **até capturar** (para quando a captura chega até 20 s depois de um arremesso). A parada por
+captura é registrada no processo principal: o `AUTO` fica vermelho, a sessão é desligada e é preciso
+marcar o aviso de novo para reativar. Cada sessão usa a própria conta; a mesma conta em dois slots
+derruba a primeira (o jogo fecha a sessão antiga). A automação está incluída na versão gratuita.
 
 ### Modo leve (notebook fraco)
 
@@ -94,10 +100,22 @@ já capturou e **quais ainda faltam** no catálogo do jogo. É **opt-in**: nada 
   extensões comunitárias já usadas no PokeIdle, mas o risco de qualquer implicação na conta é seu; por isso
   é ligado por você, sessão a sessão, e descrito aqui sem promessa de invisibilidade.
 
-Dois modos: **intervalo fixo** e **até capturar** (para quando a captura chega até 20 s depois de um arremesso). A parada por
-captura é registrada no processo principal: o `AUTO` fica vermelho, a sessão é desligada e é preciso
-marcar o aviso de novo para reativar. Cada sessão usa a própria conta; a mesma conta em dois slots
-derruba a primeira (o jogo fecha a sessão antiga). A automação está incluída na versão gratuita.
+### Rota de captura ("capturar um por um")
+
+No mesmo painel, a **Rota** usa a lista de faltantes para trabalhar a dex sozinha: o launcher abre o
+Mapa, troca de região quando precisa, viaja até a caçada do alvo e arremessa em cada caído da espécie
+até capturar — então passa ao próximo alvo da fila (ordem por nível/XP/região, limite de alvos).
+
+- É **automação completa**: os mesmos riscos da seção de Automação acima, com comportamento mais robusto
+  de bot (viagem + captura em série). Detectável em princípio; o risco de ban é seu.
+- **Custo real de bolas**: capturar espécies novas pode exigir centenas/milhares de arremessos por
+  espécie. Sem limite, a rota usa suas bolas até acabarem — o painel mostra o estoque que o jogo
+  reportou na conexão, e a rota é interrompida quando ele zerar **se o jogo mantiver esse número
+  atualizado ao vivo** (na primeira corrida, acompanhe o contador; comece com poucos alvos).
+- A rota **não escreve no socket**: cada passo é clique de usuário simulado no DOM, como o AUTO já faz;
+  a confirmação de captura vem do delta real da dex (a leitura do painel precisa estar ligada).
+- Botão **Parar rota** no painel, **Parar automações** na toolbar/bandeja também derruba a rota, e o
+  kill switch vale igual.
 
 ## Requisitos
 
@@ -127,7 +145,7 @@ só em memória enquanto a sessão estiver aberta. Nenhum dado é enviado para s
 src/main       processo principal (janela, grade, store, tray, addons, automacao)
 src/preload    bridges sandboxed (CJS): chrome.cjs (UI) e addon.cjs (pagina do jogo)
 src/renderer   toolbar/grade (HTML/CSS/JS puro)
-src/shared     motores puros (layout, engine de regras, automacao)
+src/shared     motores puros (layout, engine de regras, automacao, rota de captura)
 src/dexhook    micro-extensao local so-leitura do painel de caca (mundo da pagina)
 src/main/rules packs de dados por jogo (CSS + regras + ancoras da automacao)
 test           node:test

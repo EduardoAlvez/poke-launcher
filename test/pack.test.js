@@ -57,15 +57,17 @@ test('todos os seletores do pack sao consultaveis pelo DOM', async () => {
   }
 });
 
-test('addon preload gerado e JS valido e contem os tres blocos', async () => {
+test('addon preload gerado e JS valido e contem os quatro blocos', async () => {
   const { buildAddonPreload } = await import('../src/main/addons.js');
   const tmp = path.join(root, 'node_modules/.cache/addon-e2e');
   const file = await buildAddonPreload(tmp);
   const code = await readFile(file, 'utf8');
   assert.match(code, /PokeAddonEngine/);
   assert.match(code, /PokeAutomation/);
+  assert.match(code, /PokeRoute/);
   assert.match(code, /addon:rules/);
   assert.match(code, /automation:config/);
+  assert.match(code, /route:config/);
   const { Script } = await import('node:vm');
   assert.doesNotThrow(() => new Script(code), 'preload gerado nao compila');
 });

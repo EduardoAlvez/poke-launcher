@@ -1,7 +1,7 @@
 {
-  "version": 6,
+  "version": 7,
   "game": "pokeidle.io",
-  "updatedAt": "2026-11-05",
+  "updatedAt": "2026-11-10",
   "clickCandidates": ["#caidos-lista .caido", ".caidos-lista .caido", ".caido"],
   "countSelector": "#caidos-lista .caido",
   "pauseSelectors": ["#sessao-tomada:not(.hidden)"],
@@ -10,5 +10,14 @@
   "economyExitSelector": "#eco-sair",
   "economyEnterSelector": ".hunt-eco",
   "accountTakenSelector": "#sessao-tomada:not(.hidden)",
-  "stopOnRule": "pokemon-caught"
+  "stopOnRule": "pokemon-caught",
+  "route": {
+    "tickMs": 1200,
+    "travelTimeoutMs": 20000,
+    "mapLabel": "Mapa",
+    "hud": "#hud-hunt",
+    "hudIdAttr": "pokeId",
+    "caidoList": "#caidos-lista .caido",
+    "caidoNome": ".caido-quem"
+  }
 }

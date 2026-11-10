@@ -1,0 +1,402 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { RouteController, ROUTE_RISK_TEXT } from '../src/main/route.js';
+import { createHuntState, loadWelcome } from '../src/main/hunt-report.js';
+import '../src/shared/engine.js';
+import '../src/shared/automation.js';
+import '../src/shared/route.js';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const welcome = JSON.parse(fs.readFileSync(path.join(here, 'fixtures', 'pokeidle-welcome.sample.json'), 'utf8'));
+
+function estadoPronto() {
+  const st = createHuntState();
+  st.enabled = true;
+  loadWelcome(st, welcome);
+  return st;
+}
+
+function controllerFake(st) {
+  const sent = [];
+  const logs = [];
+  const controller = new RouteController({
+    getSlot: (id) => (id === 'slot-1' ? { id } : null),
+    getHuntState: () => st,
+    sendToSlot: (slotId, channel, payload) => sent.push([slotId, channel, payload]),
+    log: (m) => logs.push(m),
+    onChange: () => {},
+  });
+  return { controller, sent, logs };
+}
+
+test('rota recusa sem ack de risco e sem dex lida', async () => {
+  const { controller, sent } = controllerFake(estadoPronto());
+  assert.equal((await controller.start('slot-1', { ackRisk: false })).ok, false);
+  const semDex = controllerFake(null).controller;
+  assert.match((await semDex.start('slot-1', { ackRisk: true })).error, /dex/);
+  assert.equal(sent.length, 0);
+});
+
+test('start monta fila do fixture, envia route:config enxuto e vira running', async () => {
+  const { controller, sent } = controllerFake(estadoPronto());
+  const res = await controller.start('slot-1', { ackRisk: true, ordem: 'facil', maxAlvos: 2, levelCap: true });
+  assert.equal(res.ok, true);
+  assert.equal(res.targets, 2);
+  const [slotId, channel, payload] = sent[0];
+  assert.equal(slotId, 'slot-1');
+  assert.equal(channel, 'route:config');
+  assert.equal(payload.config.enabled, true);
+  assert.deepEqual(Object.keys(payload.config.targets[0]).sort(), ['nome', 'pokeId', 'slug']);
+  assert.equal(controller.isActiveRunning('slot-1'), true);
+  const pub = controller.publicState('slot-1');
+  assert.equal(pub.total, 2);
+  assert.match(ROUTE_RISK_TEXT, /ban/i);
+});
+
+test('confirmacao so vem do delta real da dex; captura avanca e re-baselineia', async () => {
+  const st = estadoPronto();
+  const { controller, sent } = controllerFake(st);
+  await controller.start('slot-1', { ackRisk: true, maxAlvos: 2, levelCap: true });
+  const alvoIndex0 = controller.publicState('slot-1');
+  assert.equal(alvoIndex0.index, 0);
+  const pokeId = 10; // facil nv1: caterpie primeiro
+  sent.length = 0;
+  controller.onHuntUpdate('slot-1', st); // nada mudou: nenhum comando
+  assert.equal(sent.length, 0);
+  st.dex[String(pokeId)] = { k: 1, c: 1, sv: 0, sc: 0 };
+  controller.onHuntUpdate('slot-1', st);
+  assert.deepEqual(sent[0], ['slot-1', 'route:cmd', { action: 'advance' }]);
+  assert.equal(controller.publicState('slot-1').captured, 1);
+  sent.length = 0;
+  controller.onHuntUpdate('slot-1', st); // c igual ao baseline: nao avanca de novo
+  assert.equal(sent.length, 0);
+});
+
+test('bolas zeradas param a rota; texto de pare chega a pagina', async () => {
+  const st = estadoPronto();
+  const { controller, sent } = controllerFake(st);
+  await controller.start('slot-1', { ackRisk: true, maxAlvos: 3, levelCap: true });
+  st.balls = { 1: 0, 4: 0 };
+  controller.onHuntUpdate('slot-1', st);
+  const last = sent[sent.length - 1];
+  assert.deepEqual(last[1], 'route:cmd');
+  assert.equal(last[2].action, 'stop');
+  assert.equal(controller.isActiveRunning('slot-1'), false);
+});
+
+test('onStatus espelha index da pagina, re-baselineia e ignora index fora da fila', async () => {
+  const st = estadoPronto();
+  const { controller } = controllerFake(st);
+  await controller.start('slot-1', { ackRisk: true, maxAlvos: 3, levelCap: true });
+  controller.onStatus('slot-1', { type: 'route-status', running: true, index: 1, state: 'viajando', throws: 9, captured: 1 });
+  const pub = controller.publicState('slot-1');
+  assert.equal(pub.index, 1);
+  assert.equal(pub.state, 'viajando');
+  assert.equal(pub.throws, 9);
+  assert.equal(pub.baselineC, undefined, 'baseline nao vaza no estado publico');
+  controller.onStatus('slot-1', { index: 99, state: 'x'.repeat(50) });
+  assert.equal(controller.publicState('slot-1').index, 1);
+  assert.equal(controller.publicState('slot-1').state, 'viajando');
+});
+
+test('stop/stopAll/clear', async () => {
+  const st = estadoPronto();
+  const { controller, sent } = controllerFake(st);
+  await controller.start('slot-1', { ackRisk: true, maxAlvos: 1, levelCap: true });
+  assert.equal((await controller.stop('slot-1', 'manual')).ok, true);
+  assert.equal(sent[sent.length - 1][2].action, 'stop');
+  assert.equal((await controller.stop('slot-1')).ok, false);
+  await controller.start('slot-1', { ackRisk: true, maxAlvos: 1, levelCap: true });
+  await controller.stopAll();
+  assert.equal(controller.isActiveRunning('slot-1'), false);
+  controller.clear('slot-1');
+  assert.equal(controller.publicState('slot-1'), null);
+});
+
+// ------- maquina in-page (src/shared/route.js) com DOM fake -------
+
+let nowMs = 1000;
+const advanceClock = (ms) => {
+  nowMs += ms;
+};
+const now = () => nowMs;
+
+function fakeWin({ stepMs = 0 } = {}) {
+  const timers = [];
+  let seq = 0;
+  return {
+    timers,
+    setTimeout: (fn) => {
+      const id = ++seq;
+      timers.push({ id, fn });
+      return id;
+    },
+    clearTimeout: (id) => {
+      const at = timers.findIndex((t) => t.id === id);
+      if (at >= 0) timers.splice(at, 1);
+    },
+    flush: () => {
+      const t = timers.shift();
+      if (!t) return false;
+      if (stepMs) advanceClock(stepMs);
+      t.fn();
+      return true;
+    },
+  };
+}
+
+function markerEl(nome) {
+  const el = {
+    tag: 'button',
+    className: 'marcador',
+    dataset: {},
+    _clicks: 0,
+    textContent: () => nome,
+  };
+  el.click = () => {
+    el._clicks += 1;
+  };
+  return el;
+}
+
+function fakeDoc({ tabs, markersByTab, hudPokeId, caidos, mapaAberto: aberto = true }) {
+  const mapaBtn = { textContent: 'Mapa', disabled: false, _clicks: 0 };
+  mapaBtn.click = () => {
+    mapaBtn._clicks += 1;
+    aberto = true;
+  };
+  let abaAtual = tabs[0];
+  const abas = tabs.map((t) => {
+    const el = { dataset: { regiao: t }, className: '', _clicks: 0 };
+    el.click = () => {
+      el._clicks += 1;
+      abaAtual = t;
+    };
+    return el;
+  });
+  const markers = {};
+  for (const t of tabs)
+    for (const slug of Object.keys(markersByTab))
+      if (markersByTab[slug].tab === t) {
+        const m = markerEl(slug);
+        if (markersByTab[slug].capturado) m.className += ' capturado';
+        markers[`${t}|${slug}`] = m;
+      }
+  const hud = { dataset: { pokeId: hudPokeId } };
+  const caido = { _clicks: 0, querySelector: () => ({ textContent: caidos?.nome || '' }) };
+  caido.click = () => {
+    caido._clicks += 1;
+  };
+  const doc = {
+    defaultView: null,
+    querySelector: (sel) => {
+      if (sel === '.mapa-reg-bt.on') return aberto ? abas.find((a) => a.dataset.regiao === abaAtual) : null;
+      if (sel === '#hud-hunt') return hud;
+      const m = /^button\.marcador\[data-slug="([^"]+)"\], \.marcador\[data-slug="([^"]+)"\]$/.exec(sel);
+      if (m) {
+        const el = markers[`${abaAtual}|${m[1]}`] ?? null;
+        if (el) el.hidden = !aberto; // jogo fecha o mapa mas deixa o DOM montado
+        return el;
+      }
+      return null;
+    },
+    querySelectorAll: (sel) => {
+      if (sel === 'button,[role=button]') return [mapaBtn];
+      if (sel === '.mapa-reg-bt') return abas;
+      if (sel === '#caidos-lista .caido') return caidos?.present ? [caido] : [];
+      return [];
+    },
+    _probe: { mapaBtn, abas, markers, hud, caido },
+  };
+  return doc;
+}
+
+const PACK = {
+  route: {
+    tickMs: 300,
+    travelTimeoutMs: 20000,
+    mapLabel: 'Mapa',
+    hud: '#hud-hunt',
+    hudIdAttr: 'pokeId',
+    caidoList: '#caidos-lista .caido',
+    caidoNome: '.caido-quem',
+  },
+};
+
+test('maquina: aba errada -> troca, viaja, arremessa e para quando confirmam', () => {
+  const doc = fakeDoc({
+    tabs: ['kanto', 'outland'],
+    markersByTab: { magma_magcargo: { tab: 'outland' } },
+    hudPokeId: '10',
+    caidos: { nome: 'Magma Magcargo Nv150', present: true },
+  });
+  const win = fakeWin();
+  const emits = [];
+  const api = globalThis.PokeRoute.installRoute({
+    config: { enabled: true, targets: [{ pokeId: 2053, slug: 'magma_magcargo', nome: 'Magma Magcargo' }] },
+    pack: PACK,
+    emit: (e) => emits.push(e),
+    doc,
+    win,
+    now,
+  });
+  const states = () => emits.filter((e) => e.type === 'route-status').map((e) => e.state);
+  win.flush(); // kanto: sem marcador -> procura regiao
+  win.flush(); // outland: marcador -> viajando
+  assert.deepEqual(states(), ['partindo', 'procurando-regiao', 'viajando']);
+  doc._probe.hud.dataset.pokeId = '2053';
+  win.flush(); // hunt: arremessa
+  assert.ok(states().includes('arremessando'));
+  assert.equal(doc._probe.caido._clicks, 1);
+  assert.equal(api.advance(), true); // main confirmou por dexMud
+  const ultimo = emits[emits.length - 1];
+  assert.equal(ultimo.state, 'fila-completa');
+  assert.equal(ultimo.running, false);
+  assert.equal(api.isRunning(), false);
+});
+
+test('maquina: sem mapa aberto, clica o botao Mapa primeiro e so depois viaja', () => {
+  const doc = fakeDoc({
+    tabs: ['kanto'],
+    markersByTab: { caterpie: { tab: 'kanto' } },
+    hudPokeId: '99',
+    caidos: { nome: 'Caterpie Nv1', present: true },
+    mapaAberto: false,
+  });
+  const win = fakeWin();
+  const emits = [];
+  globalThis.PokeRoute.installRoute({
+    config: { enabled: true, targets: [{ pokeId: 10, slug: 'caterpie', nome: 'Caterpie' }] },
+    pack: PACK,
+    emit: (e) => emits.push(e),
+    doc,
+    win,
+    now,
+  });
+  win.flush(); // sem mapa -> abre
+  win.flush(); // marcador achado -> viajando
+  doc._probe.hud.dataset.pokeId = '10';
+  win.flush(); // hunt -> arremessa
+  const states = emits.map((e) => e.state);
+  assert.ok(states.includes('abrindo-mapa'), states.join(','));
+  assert.ok(states.includes('viajando'));
+  assert.ok(states.includes('arremessando'));
+  assert.equal(doc._probe.mapaBtn._clicks, 1);
+  assert.equal(doc._probe.caido._clicks, 1);
+});
+
+test('maquina: slug invalido nunca vira selector; sem alvos termina na hora', () => {
+  const doc = fakeDoc({ tabs: ['kanto'], markersByTab: {}, hudPokeId: '1', caidos: { present: false }, mapaAberto: true });
+  const win = fakeWin();
+  const emits = [];
+  const api = globalThis.PokeRoute.installRoute({
+    config: { enabled: true, targets: [{ pokeId: 2, slug: 'x"], [data-y="p', nome: 'X' }] },
+    pack: PACK,
+    emit: (e) => emits.push(e),
+    doc,
+    win,
+    now,
+  });
+  for (let n = 0; n < 40 && api.isRunning(); n += 1) win.flush();
+  const states = emits.map((e) => e.state);
+  assert.ok(states.includes('skip-marcador'), states.join(',')); // esgotou as abas sem crash
+  assert.equal(api.isRunning(), false);
+  const vazio = globalThis.PokeRoute.installRoute({
+    config: { enabled: true, targets: [] },
+    pack: PACK,
+    emit: (e) => emits.push(e),
+    doc,
+    win: fakeWin(),
+    now,
+  });
+  assert.equal(vazio.isRunning(), false);
+  assert.equal(emits[emits.length - 1].state, 'sem-alvos');
+});
+
+test('M1: advance do main entre ticks nao multiplica cadeias de timer', () => {
+  nowMs = 1000;
+  const doc = fakeDoc({
+    tabs: ['kanto'],
+    markersByTab: { a: { tab: 'kanto' }, b: { tab: 'kanto' } },
+    hudPokeId: '1', // ja estou na area do alvo A
+    caidos: { nome: 'A', present: true },
+  });
+  const win = fakeWin();
+  const emits = [];
+  const api = globalThis.PokeRoute.installRoute({
+    config: { enabled: true, targets: [
+      { pokeId: 1, slug: 'a', nome: 'A' },
+      { pokeId: 2, slug: 'b', nome: 'B' },
+    ] },
+    pack: PACK,
+    emit: (e) => emits.push(e),
+    doc,
+    win,
+    now,
+  });
+  win.flush(); // hunt A: um arremesso
+  assert.ok(emits.map((e) => e.state).includes('arremessando'));
+  assert.equal(win.timers.length, 1);
+  api.advance(); // chega ENTRE ticks, com timer pendurado
+  assert.equal(win.timers.length, 1, 'uma unica cadeia de tick apos advance');
+  win.flush(); // B: marcador -> viajando
+  assert.ok(emits.map((e) => e.state).includes('viajando'));
+  assert.equal(win.timers.length, 1);
+});
+
+test('maquina: marcador .capturado pula sem gastar viagem nem bola', () => {
+  nowMs = 1000;
+  const doc = fakeDoc({
+    tabs: ['kanto'],
+    markersByTab: { drowzee: { tab: 'kanto', capturado: true } },
+    hudPokeId: '99',
+    caidos: { present: false },
+  });
+  const win = fakeWin();
+  const emits = [];
+  const api = globalThis.PokeRoute.installRoute({
+    config: { enabled: true, targets: [{ pokeId: 96, slug: 'drowzee', nome: 'Drowzee' }] },
+    pack: PACK,
+    emit: (e) => emits.push(e),
+    doc,
+    win,
+    now,
+  });
+  win.flush();
+  const states = emits.map((e) => e.state);
+  assert.ok(states.includes('skip-capturado'), states.join(','));
+  assert.equal(doc._probe.abas[0]._clicks, 0, 'nem trocou de aba');
+  assert.equal(api.isRunning(), false);
+});
+
+test('maquina: deadline ABSOLUTO por alvo mesmo com HUD oscilando (travel<->hunt)', () => {
+  nowMs = 1000;
+  const doc = fakeDoc({
+    tabs: ['kanto'],
+    markersByTab: { z: { tab: 'kanto' } },
+    hudPokeId: '5',
+    caidos: { nome: 'Z', present: true },
+  });
+  const win = fakeWin({ stepMs: 50_000 }); // cada tick "passa" 50 s
+  const emits = [];
+  const api = globalThis.PokeRoute.installRoute({
+    config: { enabled: true, targets: [{ pokeId: 5, slug: 'z', nome: 'Z' }], maxTempoMs: 120_000 },
+    pack: PACK,
+    emit: (e) => emits.push(e),
+    doc,
+    win,
+    now,
+  });
+  win.flush(); // hunt, arremesso 1 (agora 51k)
+  // concorrente senta na area: HUD sai do alvo -> travel -> marcador -> wait-hud
+  doc._probe.hud.dataset.pokeId = '999';
+  win.flush(); // fora do alvo: re-clica marcador (agora 101k)
+  doc._probe.hud.dataset.pokeId = '5'; // volta
+  win.flush(); // hunt de novo, mas o deadline ABSOLUTO (121k) venceu (agora 151k)
+  const states = emits.map((e) => e.state);
+  assert.ok(states.includes('skip-tempo'), states.join(','));
+  assert.equal(api.isRunning(), false);
+});
