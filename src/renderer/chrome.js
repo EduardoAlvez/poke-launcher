@@ -139,10 +139,29 @@ function closeModal() {
   window.launcher.setViewsVisible(true);
 }
 
+/**
+ * Nome padrao da nova conta: "Conta 1", "Conta 2"... sequencial e sem colidir
+ * com quem ja existe (se o usuario renomeou, o proximo numero continua o
+ * maior em uso). Vem preenchido no campo: para criar conta, so aperta Enter.
+ */
+function proximoNomeConta() {
+  const usados = new Set(lastSlots.map((s) => (s.name || '').trim().toLowerCase()));
+  let maior = 0;
+  for (const s of lastSlots) {
+    const m = /^conta\s*(\d+)$/i.exec((s.name || '').trim());
+    if (m) maior = Math.max(maior, Number(m[1]));
+  }
+  let n = maior + 1;
+  while (usados.has(`conta ${n}`)) n += 1;
+  return `Conta ${n}`;
+}
+
 addBtn.addEventListener('click', () => {
   form.hidden = false;
   addBtn.hidden = true;
+  nameInput.value = proximoNomeConta();
   nameInput.focus();
+  nameInput.select();
 });
 document.getElementById('add-cancel').addEventListener('click', closeForm);
 form.addEventListener('submit', async (e) => {
@@ -627,14 +646,15 @@ const huntLevelcap = document.getElementById('hunt-levelcap');
 const huntLevelcapNv = document.getElementById('hunt-levelcap-nv');
 const huntRefresh = document.getElementById('hunt-refresh');
 const huntClose = document.getElementById('hunt-close');
+const huntInfo = document.getElementById('hunt-info');
 const huntStatus = document.getElementById('hunt-status');
+const huntError = document.getElementById('hunt-error');
 const huntBody = document.getElementById('hunt-body');
 const huntArea = document.getElementById('hunt-area');
 const huntMissing = document.getElementById('hunt-missing');
 const huntMissingCount = document.getElementById('hunt-missing-count');
 const huntAreaList = document.getElementById('hunt-area-list');
 const huntProgress = document.getElementById('hunt-progress');
-const huntRoute = document.getElementById('hunt-route');
 const routeRisk = document.getElementById('route-risk');
 const routeAck = document.getElementById('route-ack');
 const routeOrdem = document.getElementById('route-ordem');
@@ -658,7 +678,7 @@ function bolasTotais(balls) {
 function showRouteMsg(msg, isError) {
   routeMsg.hidden = !msg;
   routeMsg.textContent = msg;
-  if (msg) routeMsg.style.color = isError ? '#ff6b6b' : '#3fbf7f';
+  routeMsg.className = msg ? `msg ${isError ? 'err' : 'ok'}` : 'msg';
 }
 
 function renderRouteStatus(st) {
@@ -732,42 +752,44 @@ function huntRow(text, meta, cls) {
 }
 
 function renderHunt(res) {
+  const slot = lastSlots.find((s) => s.id === huntSlotSel.value);
+  huntInfo.textContent = slot ? `${slot.name} · ${slot.url}` : '';
   if (!res || !res.ok) {
-    huntStatus.hidden = false;
-    huntStatus.textContent = (res && res.error) || 'Sem resposta do painel.';
+    huntStatus.hidden = true;
+    huntError.hidden = false;
+    huntError.textContent = (res && res.error) || 'Sem resposta do painel.';
     huntBody.hidden = true;
-    huntRoute.hidden = true;
     huntLevelcap.disabled = true;
     return;
   }
   if (!res.enabled) {
     huntEnable.checked = false;
     huntBody.hidden = true;
-    huntRoute.hidden = true;
     huntLevelcap.disabled = true;
+    huntError.hidden = true;
     huntStatus.hidden = false;
     huntStatus.textContent =
-      'Ative “Ler dex desta sessão” para o launcher observar (só ler) o tráfego do jogo. Nada é enviado e a dex não é salva em disco.';
+      'Ative “Ler a dex desta sessão” para o launcher observar (só ler) o tráfego do jogo. Nada é enviado e a dex não é salva em disco.';
     return;
   }
   if (!res.ready) {
     huntEnable.checked = true;
     huntBody.hidden = true;
-    huntRoute.hidden = true;
     huntLevelcap.disabled = true;
+    huntError.hidden = true;
     huntStatus.hidden = false;
     huntStatus.textContent = 'Leitura ligada; recarreguei a aba. Os dados chegam quando o jogo conectar nesta conta.';
     return;
   }
   huntEnable.checked = true;
   huntStatus.hidden = true;
+  huntError.hidden = true;
   huntBody.hidden = false;
   huntLevelcap.disabled = !res.trainerLevel;
   huntLevelcapNv.textContent = res.trainerLevel ? `(≤ ${res.trainerLevel})` : '';
-  huntRoute.hidden = false;
   const view = res.view;
   lastBalls = view.balls ?? null;
-  renderRouteStatus((lastSlots.find((s) => s.id === huntSlotSel.value) || {}).route);
+  renderRouteStatus((slot || {}).route);
   huntArea.textContent = view.current
     ? `Área atual: ${view.current.nome} · nível ${view.current.nivel} (${view.current.area})`
     : 'Sem área de caça reconhecida nesta sessão.';
@@ -794,6 +816,7 @@ async function loadHunt() {
     if (!id) {
       huntStatus.hidden = false;
       huntStatus.textContent = 'Abra uma sessão primeiro.';
+      huntError.hidden = true;
       huntBody.hidden = true;
       return;
     }
@@ -801,6 +824,7 @@ async function loadHunt() {
   } catch (err) {
     huntStatus.hidden = false;
     huntStatus.textContent = err?.message || 'Falha ao ler o painel.';
+    huntError.hidden = true;
     huntBody.hidden = true;
   } finally {
     huntBusy = false;

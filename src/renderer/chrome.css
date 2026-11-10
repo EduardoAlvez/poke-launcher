@@ -129,11 +129,18 @@ button.danger:hover { border-color: #ff6b6b; }
   user-select: text;
 }
 .script-warn[hidden] { display: none; }
-.hunt-head { display: flex; align-items: center; gap: 14px; margin: 6px 0 12px; flex-wrap: wrap; }
-.hunt-head label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--fg); }
-.hunt-head select {
-  background: #0e1015; color: var(--fg); border: 1px solid #2c3240; border-radius: 6px; padding: 5px 8px; font-size: 12px;
+/* O painel de caça segue a linguagem do modal de automação: mesma grade,
+   mesmos checks, mesmo bloco de risco e barra de ações embaixo. */
+#hunt-modal {
+  position: fixed; inset: 0; background: #0b0d11cc;
+  display: flex; align-items: center; justify-content: center; z-index: 10;
 }
+#hunt-modal[hidden] { display: none; }
+.info { color: var(--muted); font-size: 12px; line-height: 1.45; margin: 6px 0 10px; }
+.msg { font-size: 12px; margin: 6px 0 0; }
+.msg.ok { color: #3fbf7f; }
+.msg.err { color: #ff6b6b; }
+#hunt-modal .error { max-width: none; white-space: normal; }
 .hunt-area { color: var(--fg); font-size: 13px; margin: 4px 0 10px; }
 .hunt-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .hunt-cols h3 { font-size: 12px; color: var(--muted); margin: 0 0 6px; text-transform: uppercase; letter-spacing: .4px; }
@@ -147,7 +154,6 @@ button.danger:hover { border-color: #ff6b6b; }
 .hunt-list li .h-meta { color: var(--muted); font-size: 11px; white-space: nowrap; }
 .hunt-list li.catch { border: 1px solid #3a3f4d; }
 .hunt-list li.catch b { color: var(--accent); font-weight: 600; }
-.route-title { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin: 16px 0 4px; }
 .script-list {
   display: flex; flex-direction: column; gap: 4px;
   max-height: 150px; overflow-y: auto; margin-bottom: 10px;

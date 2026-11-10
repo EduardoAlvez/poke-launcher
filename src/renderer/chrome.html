@@ -109,22 +109,41 @@
   <div id="hunt-modal" hidden>
     <div class="modal-card wide" role="dialog" aria-modal="true" aria-labelledby="hunt-title">
       <h2 id="hunt-title">Painel de caça</h2>
-      <p class="hint">Mostra o que a área oferece e quais espécies a conta ainda não capturou. Só lê o tráfego do jogo; nada é enviado.</p>
-      <div class="hunt-head">
+      <p id="hunt-info" class="muted"></p>
+
+      <div class="grid">
         <label>Sessão
           <select id="hunt-slot"></select>
         </label>
-        <label class="check">
-          <input type="checkbox" id="hunt-enable" />
-          <span>Ler dex desta sessão</span>
+        <label>Ordem da rota
+          <select id="route-ordem">
+            <option value="facil">mais fácil primeiro (nv baixo)</option>
+            <option value="xp">mais XP primeiro</option>
+            <option value="regiao">por região</option>
+          </select>
         </label>
-        <label class="check">
-          <input type="checkbox" id="hunt-levelcap" checked />
-          <span>Só até meu nível <span id="hunt-levelcap-nv" class="muted"></span></span>
+        <label>Máx. alvos
+          <input type="number" id="route-max" min="1" max="500" step="1" value="3" />
         </label>
-        <button id="hunt-refresh">Atualizar</button>
       </div>
-      <p id="hunt-status" class="script-warn" hidden></p>
+
+      <label class="check">
+        <input type="checkbox" id="hunt-enable" />
+        <span>Ler a dex desta sessão</span>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="hunt-levelcap" checked />
+        <span>Só até meu nível <span id="hunt-levelcap-nv" class="muted"></span></span>
+      </label>
+
+      <p id="route-risk" class="risk"></p>
+      <label class="check">
+        <input type="checkbox" id="route-ack" />
+        <span>Entendo o risco e autorizo a rota nesta conta</span>
+      </label>
+
+      <p id="hunt-status" class="info" hidden></p>
+
       <div id="hunt-body" hidden>
         <p id="hunt-area" class="hunt-area"></p>
         <div class="hunt-cols">
@@ -137,36 +156,18 @@
             <ul id="hunt-area-list" class="hunt-list"></ul>
           </div>
         </div>
-        <p id="hunt-progress" class="muted"></p>
-        <div id="hunt-route" hidden>
-          <h3 class="route-title">Capturar um por um</h3>
-          <p id="route-risk" class="risk"></p>
-          <label class="check">
-            <input type="checkbox" id="route-ack" />
-            <span>Entendo o risco e autorizo a rota nesta conta</span>
-          </label>
-          <div class="grid">
-            <label>Ordem
-              <select id="route-ordem">
-                <option value="facil">mais fácil primeiro (nv baixo)</option>
-                <option value="xp">mais XP primeiro</option>
-                <option value="regiao">por região</option>
-              </select>
-            </label>
-            <label>Máx. alvos
-              <input type="number" id="route-max" min="1" max="500" step="1" value="3" />
-            </label>
-          </div>
-          <p id="route-status" class="muted" hidden></p>
-          <p id="route-msg" class="error" hidden></p>
-          <div class="actions">
-            <button id="route-stop" class="danger" hidden>Parar rota</button>
-            <button id="route-start" class="ok" disabled>Capturar um por um</button>
-          </div>
-        </div>
+        <p id="hunt-progress" class="info"></p>
+        <p id="route-status" class="info" hidden></p>
       </div>
+
+      <p id="hunt-error" class="error" hidden></p>
+      <p id="route-msg" class="msg" hidden></p>
+
       <div class="actions">
+        <button id="route-stop" class="danger" hidden>Parar rota</button>
+        <button id="hunt-refresh">Atualizar</button>
         <button id="hunt-close">Fechar</button>
+        <button id="route-start" class="ok" disabled>Capturar um por um</button>
       </div>
     </div>
   </div>
