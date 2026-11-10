@@ -36,7 +36,7 @@ test('parseState aceita estado valido', () => {
   assert.equal(res.state.maxSlots, 4);
 });
 
-test('maxSlots padrao e 8 e nunca fica abaixo das sessoes salvas', () => {
+test('maxSlots: padrao 8, teto legado 2 sobe, valor gravado vale, nunca perde sessoes', () => {
   const semLimite = parseState(JSON.stringify({ schemaVersion: SCHEMA_VERSION, slots: [validSlot] }));
   assert.equal(semLimite.state.maxSlots, 8, 'sem maxSlots no arquivo, o padrao e 8');
 
@@ -46,7 +46,17 @@ test('maxSlots padrao e 8 e nunca fica abaixo das sessoes salvas', () => {
     partition: `persist:slot-${n}`,
   }));
   const apertado = parseState(JSON.stringify({ schemaVersion: SCHEMA_VERSION, maxSlots: 2, slots }));
-  assert.equal(apertado.state.maxSlots, 5, 'restaurar nao pode descartar sessoes salvas');
+  assert.equal(apertado.state.maxSlots, 8, 'teto legado 2 sobe para o padrao e nunca descarta sessoes salvas');
+
+  // teto legado (1a versao usava 2) nao pode prender a conta em 2 sessoes
+  const legado = parseState(
+    JSON.stringify({ schemaVersion: SCHEMA_VERSION, maxSlots: 2, slots: [validSlot] })
+  );
+  assert.equal(legado.state.maxSlots, 8, 'teto antigo e elevado ao padrao atual');
+
+  // valor gravado fora do legado continua valendo
+  const quatro = parseState(JSON.stringify({ schemaVersion: SCHEMA_VERSION, maxSlots: 4, slots: [validSlot] }));
+  assert.equal(quatro.state.maxSlots, 4, 'teto gravado pelo usuario e respeitado');
 
   const gigante = parseState(JSON.stringify({ schemaVersion: SCHEMA_VERSION, maxSlots: 999, slots: [validSlot] }));
   assert.equal(gigante.state.maxSlots, 16, 'limite absurdo e contido');

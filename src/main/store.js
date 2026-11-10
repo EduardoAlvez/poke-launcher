@@ -4,6 +4,9 @@ import path from 'node:path';
 export const SCHEMA_VERSION = 1;
 export const DEFAULT_MAX_SLOTS = 8;
 export const MAX_SLOTS_LIMIT = 16;
+// Teto da 1a versao do launcher (commit 75893b1): arquivos com esse valor
+// vieram do padrao antigo, nao de escolha do usuario.
+const LEGACY_MAX_SLOTS = 2;
 export const MAX_SCRIPTS = 50;
 export const MAX_SCRIPT_NAME = 40;
 export const MAX_SCRIPT_CODE = 100_000;
@@ -137,7 +140,12 @@ export function parseState(rawText) {
   // O limite nunca fica abaixo das sessoes ja salvas: restaurar acima do
   // limite descartaria a sessao (e a particao dela seria varrida depois).
   const stored = Number.isInteger(data.maxSlots) && data.maxSlots > 0 ? data.maxSlots : DEFAULT_MAX_SLOTS;
-  const maxSlots = Math.max(Math.min(MAX_SLOTS_LIMIT, stored), slots.length);
+  // A 1a versao do launcher gravava maxSlots=2 como padrao; quem rodou com ela
+  // ficou preso em 2 sessoes para sempre, sem nenhuma forma de subir pela UI.
+  // Esse teto legado sobe para o padrao atual; qualquer outro valor gravado
+  // continua valendo (e nunca fica abaixo das sessoes ja salvas).
+  const teto = stored === LEGACY_MAX_SLOTS ? DEFAULT_MAX_SLOTS : stored;
+  const maxSlots = Math.max(Math.min(MAX_SLOTS_LIMIT, teto), slots.length);
   // Script invalido nao pode custar as sessoes: descarta o script e segue,
   // mas avisa (o modal nao pode fingir que o script nunca existiu).
   const scripts = [];
