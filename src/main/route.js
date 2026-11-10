@@ -19,6 +19,11 @@ export const ROUTE_RISK_TEXT = [
 const MAX_SEND_TARGETS = 500;
 
 export class RouteController {
+  /**
+   * `onChange(slotId)` — o slot que mudou. Quem chama precisa saber qual
+   * sessao parou: a rota que acaba sozinha (sem bolas) tambem libera o campo,
+   * e a preferencia de Economia/Ultra do usuario pode voltar.
+   */
   constructor({ getSlot, getHuntState, sendToSlot, log = console.error, onChange = () => {} } = {}) {
     this.getSlot = getSlot;
     this.getHuntState = getHuntState;
@@ -106,7 +111,7 @@ export class RouteController {
     run.lastPayload = null; // dom-ready posterior nao deve reanimar o que foi parado
     this.sendToSlot(slotId, 'route:cmd', { action: 'stop', reason });
     this.log(`[route] ${slotId}: parada (${reason})`);
-    this.onChange();
+    this.onChange(slotId);
     return { ok: true };
   }
 
@@ -141,7 +146,7 @@ export class RouteController {
         this.sendToSlot(slotId, 'route:cmd', { action: 'advance' });
         this.log(`[route] ${slotId}: capturou ${t.nome} (${run.captured}/${run.targets.length})`);
         // o proximo alvo ganha baseline quando a pagina reportar o novo index
-        this.onChange();
+        this.onChange(slotId);
       }
     }
     const totalBolas = Object.values(st.balls ?? {}).reduce((s, v) => s + (Number(v) || 0), 0);
@@ -167,6 +172,6 @@ export class RouteController {
     if (Number.isFinite(msg.balls)) run.balls = msg.balls;
     if (typeof msg.state === 'string' && msg.state.length <= 40) run.state = msg.state;
     if (msg.running === false) run.running = false;
-    this.onChange();
+    this.onChange(slotId);
   }
 }

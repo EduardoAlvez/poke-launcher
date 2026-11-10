@@ -22,15 +22,32 @@ function estadoPronto() {
 function controllerFake(st) {
   const sent = [];
   const logs = [];
+  const mudancas = [];
   const controller = new RouteController({
     getSlot: (id) => (id === 'slot-1' ? { id } : null),
     getHuntState: () => st,
     sendToSlot: (slotId, channel, payload) => sent.push([slotId, channel, payload]),
     log: (m) => logs.push(m),
-    onChange: () => {},
+    onChange: (slotId) => mudancas.push(slotId ?? null),
   });
-  return { controller, sent, logs };
+  return { controller, sent, logs, mudancas };
 }
+
+test('a rota avisa QUAL sessao parou (para a preferencia poder voltar)', async () => {
+  // A rota que para sozinha (sem bolas) tambem libera o campo: quem decide
+  // a volta da preferencia de Economia/Ultra precisa saber qual sessao parou.
+  const st = estadoPronto();
+  st.balls = { 'ultra': 0 };
+  const { controller, mudancas } = controllerFake(st);
+  await controller.start('slot-1', { ackRisk: true, maxAlvos: 1 });
+  mudancas.length = 0;
+  controller.onHuntUpdate('slot-1', st);
+  assert.ok(
+    mudancas.includes('slot-1'),
+    `o onChange precisa levar o slot (veio: ${JSON.stringify(mudancas)})`
+  );
+  assert.equal(controller.isActiveRunning('slot-1'), false, 'a rota parou por falta de bolas');
+});
 
 test('rota recusa sem ack de risco e sem dex lida', async () => {
   const { controller, sent } = controllerFake(estadoPronto());

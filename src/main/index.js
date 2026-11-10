@@ -101,7 +101,12 @@ const route = new RouteController({
     if (!wc || wc.isDestroyed()) return;
     wc.send(channel, payload);
   },
-  onChange: () => sendState(),
+  onChange: (slotId) => {
+    sendState();
+    // A rota que para sozinha (sem bolas) tambem libera o campo: a
+    // preferencia de Economia/Ultra do usuario pode voltar.
+    if (slotId) restaurarPreferenciaSeParou(slotId).catch(() => {});
+  },
 });
 
 /**
@@ -398,6 +403,19 @@ async function restoreSlots() {
   sendState();
   for (const slot of registry.slots) {
     setTimeout(() => refreshLoginBadge(slot), 4000);
+  }
+  // A preferencia de Economia/Ultra que ficou PENDENTE (o modo leve desligou
+  // com AUTO/rota rodando) precisa voltar em algum momento — inclusive
+  // depois de um reinicio do launcher. Sem o modo leve ligado, o campo nao
+  // esta em uso: a volta pode acontecer assim que a pagina carregar.
+  for (const slot of registry.slots) {
+    if (!slot.prefsEconomiaPendente) continue;
+    setTimeout(() => {
+      if (slot.lightMode === true) return; // com o modo leve ligado, a vigia briga com o restauro
+      restaurarPreferenciaSeParou(slot.id).catch((err) => {
+        console.error(`[restore] slot ${slot.id}: preferencia pendente:`, err.message);
+      });
+    }, 6000);
   }
 }
 
