@@ -36,9 +36,22 @@ function isRatio(value) {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
 }
 
+/**
+ * Preferencia de Economia/ULTRA que o USUARIO tinha antes do modo leve.
+ * O jogo zera a chave ao sair do modo, entao o launcher precisa lembrar
+ * (e devolver no fim). Guardada por sessao para sobreviver a reinicio.
+ */
+function parsePrefsEconomia(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const economia = raw.economia === true;
+  const ultra = raw.ultra === true;
+  if (!economia && !ultra) return null;
+  return { economia, ultra };
+}
+
 export function parseSlot(raw) {
   if (!raw || typeof raw !== 'object') return { ok: false, error: 'slot nao e objeto' };
-  const { id, name, url, partition, ratios, muted, zoomFactor, automation, lightMode, eco, dexWatch } = raw;
+  const { id, name, url, partition, ratios, muted, zoomFactor, automation, lightMode, eco, dexWatch, prefsEconomia, prefsEconomiaPendente } = raw;
   if (typeof id !== 'string' || !SLOT_ID.test(id)) {
     return { ok: false, error: `id invalido: ${JSON.stringify(id)}` };
   }
@@ -60,6 +73,8 @@ export function parseSlot(raw) {
     lightMode: lightMode === true,
     eco: eco === true,
     dexWatch: dexWatch === true,
+    prefsEconomia: parsePrefsEconomia(prefsEconomia),
+    prefsEconomiaPendente: parsePrefsEconomia(prefsEconomiaPendente),
     automation: parseAutomation(automation),
   };
   return { ok: true, slot };
@@ -191,6 +206,8 @@ export function buildSnapshot(previous, slots) {
         lightMode: s.lightMode === true,
         eco: s.eco === true,
         dexWatch: s.dexWatch === true,
+        prefsEconomia: parsePrefsEconomia(s.prefsEconomiaDoUsuario ?? s.prefsEconomia),
+        prefsEconomiaPendente: parsePrefsEconomia(s.prefsEconomiaPendente),
         automation: s.automation ?? null,
       };
     }),

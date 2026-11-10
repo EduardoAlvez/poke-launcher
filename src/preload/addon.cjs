@@ -3,6 +3,7 @@ const { ipcRenderer } = require('electron');
 let automationHandle = null;
 let lastRulesJson = null;
 let lastAutomationJson = null;
+let lastAutomationConfig = null;
 
 // ---- Ponte do painel de caça (Fase 9) ----
 // O hook roda no MUNDO DA PAGINA (extensao dexhook) e fala com a gente por
@@ -144,6 +145,9 @@ ipcRenderer.on('automation:config', (_event, payload) => {
   const key = JSON.stringify(config);
   if (key === lastAutomationJson) return;
   lastAutomationJson = key;
+  // O motor le a config a cada tique: guardar a referencia permite mudar uma
+  // flag sem reinstalar o motor (reinstalar zeraria a cota de arremessos).
+  lastAutomationConfig = config;
 
   const automation = globalThis.PokeAutomation;
   globalThis.PokeAutomationHandle?.stop?.('reconfigurado');
@@ -162,6 +166,16 @@ ipcRenderer.on('automation:config', (_event, payload) => {
     pack: payload?.pack ?? { clickCandidates: [], pauseSelectors: [], pauseText: [] },
     emit: (evt) => ipcRenderer.send('automation:status', evt),
   });
+});
+
+// O modo leve liga/desliga muda QUEM e o dono da preferencia de Economia
+// (o launcher passa a guardar e devolver). Mudo a flag no objeto da config:
+// o motor le a config a cada tique, e reinstala-lo zeraria a cota de
+// arremessos do minuto — um efeito colateral invisivel para o usuario.
+ipcRenderer.on('automation:gerencia', (_event, gerencia) => {
+  if (!lastAutomationConfig) return;
+  lastAutomationConfig.gerenciaEconomia = gerencia === true;
+  console.log(`[automation] preferencia de Economia agora e do ${gerencia === true ? 'launcher' : 'AUTO'}`);
 });
 
 // ---- Rota "capturar um por um" (Fase 10) ----

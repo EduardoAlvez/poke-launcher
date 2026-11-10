@@ -1,10 +1,15 @@
 import {
   LIGHT_APPLY,
   LIGHT_CSS,
+  LIGHT_EM_ECONOMIA,
+  LIGHT_LIGAR_ECONOMIA,
+  LIGHT_LIGAR_ULTRA,
   LIGHT_PREFS_OFF,
-  LIGHT_PREFS_ON,
+  LIGHT_PREFS_READ,
   LIGHT_REAPPLY,
   LIGHT_RESTORE,
+  LIGHT_SAIR_ECONOMIA,
+  LIGHT_SAIR_ULTRA,
   LIGHT_VERIFY,
   LIGHT_WATCH,
 } from './light.js';
@@ -40,11 +45,85 @@ export class LightMode {
   }
 
   /**
-   * Liga o modo leve nesta sessão. Se o jogo estiver em Economia/Ultra (a
-   * preferência vive no localStorage), zera e recarrega para ele relembrar a
-   * escolha; se já estiver fora, aplica na hora — recarregar sem necessidade
-   * só atrapalha quem está caçando. O CSS + o limite de rAF entram no próprio
-   * documento ou no próximo `did-finish-load`.
+   * A preferencia do usuario (Economia/Ultra ligada?) ANTES de o launcher
+   * mexer no jogo. O botao do jogo zera a chave ao ser clicado — sem esta
+   * leitura, a restauracao no fim do modo leve nao teria o que restaurar.
+   */
+  async lerPreferenciaDoUsuario(slot) {
+    const wc = slot.view?.webContents;
+    if (!wc || wc.isDestroyed() || !/^https?:/i.test(wc.getURL())) return null;
+    const prefs = await wc.executeJavaScript(LIGHT_PREFS_READ, true).catch(() => null);
+    if (!prefs || typeof prefs !== 'object') return null;
+    return { economia: prefs.economia === true, ultra: prefs.ultra === true };
+  }
+
+  /**
+   * Tira o jogo do Modo Economia/Ultra pelo botao do PROPRIO JOGO (sem
+   * reload e sem escrever a preferencia): o jogo e quem avisa o servidor
+   * (cliente.economia{ativo:false}) e o campo volta.
+   *
+   * O clique pode nao agir (botao desabilitado, handler que nao responde):
+   * por isso a saida e CONFIRMADA relendo o estado do jogo. Sem essa
+   * checagem, o launcher acreditaria que saiu do Economia — e o campo nunca
+   * voltaria, enquanto o AUTO ficaria sem alvo achando que tudo deu certo.
+   */
+  async sairDoEconomiaPeloJogo(slot) {
+    const wc = slot.view?.webContents;
+    if (!wc || wc.isDestroyed()) return 'sem-pagina';
+    const estado = await wc.executeJavaScript(LIGHT_EM_ECONOMIA, true).catch(() => 'erro');
+    if (estado === 'economia') {
+      const r = await wc.executeJavaScript(LIGHT_SAIR_ECONOMIA, true).catch(() => 'erro');
+      if (r !== 'ok') return 'sem-botao';
+      return (await this.confirmouSaida(slot, 'economia')) ? 'saiu-economia' : 'sem-efeito';
+    }
+    if (estado === 'ultra') {
+      const r = await wc.executeJavaScript(LIGHT_SAIR_ULTRA, true).catch(() => 'erro');
+      if (r !== 'ok') return 'sem-botao';
+      return (await this.confirmouSaida(slot, 'ultra')) ? 'saiu-ultra' : 'sem-efeito';
+    }
+    return 'ja-fora';
+  }
+
+  /**
+   * O clique ja foi dado: o jogo saiu do modo? O handler pode ser assincrono,
+   * entao da alguns tiques antes de desistir (o jogo roda em 60 fps e o
+   * clique entra na proxima volta do event loop).
+   */
+  async confirmouSaida(slot, modo) {
+    const wc = slot.view?.webContents;
+    if (!wc || wc.isDestroyed()) return false;
+    for (let i = 0; i < 5; i += 1) {
+      const estado = await wc.executeJavaScript(LIGHT_EM_ECONOMIA, true).catch(() => 'erro');
+      if (estado !== modo) return true;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    return false;
+  }
+
+  /**
+   * Junta a preferencia lembrada com a que acabou de ser lida. Uma
+   * preferencia lembrada NUNCA volta de '1' para '0': o botao do jogo zera a
+   * chave ao sair, e isso nao e escolha do usuario.
+   */
+  static juntaPreferencias(lembrada, nova) {
+    if (!lembrada && !nova) return null;
+    const memoria = lembrada ?? {};
+    const prefs = {
+      economia: memoria.economia === true || nova?.economia === true,
+      ultra: memoria.ultra === true || nova?.ultra === true,
+    };
+    return prefs.economia || prefs.ultra ? prefs : null;
+  }
+
+  /**
+   * Liga o modo leve nesta sessao SEM recarregar a pagina:
+   *  1. lembra a preferencia do usuario (ela vive no localStorage da pagina);
+   *  2. se o jogo estiver em Economia/Ultra, sai pelo botao do jogo;
+   *  3. aplica o CSS + o limite de rAF na hora.
+   *
+   * Se o botao nao resolver (sem botao, ou o clique nao agiu), quem decide
+   * o fallback (preferencia + reload) e o main — aqui a gente nao finge que
+   * ligou: devolve o que aconteceu.
    */
   async enable(slot) {
     return this.queue(slot, async () => {
@@ -54,25 +133,60 @@ export class LightMode {
       const wc = slot.view.webContents;
       if (wc.isDestroyed()) {
         slot.lightMode = false;
-        return false;
+        return { ok: false, motivo: 'sessao-morta' };
       }
-      if (!/^https?:/i.test(wc.getURL())) return true;
-      const dirty = await wc.executeJavaScript(LIGHT_PREFS_ON, true).catch(() => false);
-      if (this.stale(slot, wc, gen)) return true;
-      if (!dirty) return this.applyNow(slot);
-      const off = await wc.executeJavaScript(LIGHT_PREFS_OFF, true).catch(() => false);
-      if (this.stale(slot, wc, gen)) return true;
-      if (!off) {
-        console.error(`[${slot.id}] modo leve: localStorage recusou desligar Economia/Ultra`);
-        return false;
+      if (!/^https?:/i.test(wc.getURL())) return { ok: true, motivo: 'sem-pagina' };
+
+      // 1. preferencia do usuario, lembrada ANTES de qualquer clique
+      const prefs = await this.lerPreferenciaDoUsuario(slot);
+      if (prefs) {
+        slot.prefsEconomiaDoUsuario = LightMode.juntaPreferencias(slot.prefsEconomiaDoUsuario, prefs);
       }
-      wc.reload();
-      return true;
+
+      // 2. sai do Economia/Ultra pelo botao do jogo (sem reload)
+      const estado = await wc.executeJavaScript(LIGHT_EM_ECONOMIA, true).catch(() => 'erro');
+      if (estado === 'economia' || estado === 'ultra') {
+        const saiu = await this.sairDoEconomiaPeloJogo(slot);
+        if (this.stale(slot, wc, gen)) return { ok: true, motivo: 'stale' };
+        if (saiu !== 'saiu-economia' && saiu !== 'saiu-ultra') {
+          // Ultimo recurso: sem o botao do jogo nao ha como pedir o campo de
+          // volta sem recarregar. A preferencia do usuario ja esta guardada
+          // (passo 1), entao o restore continua funcionando depois.
+          const off = await wc.executeJavaScript(LIGHT_PREFS_OFF, true).catch(() => false);
+          if (off) {
+            slot.lightReloadAt = Date.now();
+            wc.reload();
+            console.error(
+              `[${slot.id}] modo leve: botao do jogo indisponivel (${saiu}); recarregando como ultimo recurso`
+            );
+            return { ok: true, motivo: 'fallback-reload' };
+          }
+          console.error(`[${slot.id}] modo leve: nao consegui sair pelo botao do jogo (${saiu})`);
+          return { ok: false, motivo: saiu };
+        }
+        console.info(
+          `[${slot.id}] modo leve: saiu do Modo ${estado === 'ultra' ? 'ULTRA' : 'Economia'} pelo botao do jogo (sem recarregar)`
+        );
+      }
+
+      // 3. aplica o modo leve (CSS + rAF) agora
+      const applied = await this.applyNow(slot);
+      if (!applied) return { ok: false, motivo: 'rAF-nao-confirmado' };
+      return { ok: true, motivo: 'ligado' };
     });
   }
 
-  /** Desliga sem recarregar: devolve o rAF original e remove o CSS injetado. */
-  async disable(slot) {
+  /**
+   * Desliga sem recarregar: devolve o rAF original, remove o CSS injetado e
+   * **restaura a preferencia do usuario** (Economia/Ultra) — mas so quando
+   * ninguem mais precisa do campo, isto e, quando nao ha AUTO nem rota rodando.
+   * Com AUTO/rota no meio, a restauracao fica **pendente** (nao e esquecida):
+   * quem consome e o stop() do AUTO/rota.
+   *
+   * Devolve 'restaurado' | 'adiado' | 'nada-a-restaurar' | 'falhou' — nao um
+   * booleano que mentiria sobre o que aconteceu com a configuracao do usuario.
+   */
+  async disable(slot, { campoEmUso = false } = {}) {
     return this.queue(slot, async () => {
       this.begin(slot);
       slot.lightMode = false;
@@ -81,7 +195,7 @@ export class LightMode {
       const wc = slot.view.webContents;
       if (wc.isDestroyed()) {
         slot.lightCssKey = null;
-        return true;
+        return { ok: true, restauracao: 'nada-a-restaurar' };
       }
       const key = slot.lightCssKey;
       slot.lightCssKey = null;
@@ -101,15 +215,102 @@ export class LightMode {
         console.error(`[${slot.id}] modo leve: nao consegui restaurar o rAF:`, err.message);
       }
       this.onChange?.(slot);
-      return ok;
+      if (!ok) {
+        // A limpeza falhou: a preferencia do usuario nao pode ser perdida
+        // junto. Fica PENDENTE para o proximo momento em que o campo nao for
+        // preciso (mesmo caminho do AUTO/rota rodando).
+        slot.prefsEconomiaPendente = LightMode.juntaPreferencias(
+          slot.prefsEconomiaPendente,
+          slot.prefsEconomiaDoUsuario
+        );
+        return { ok: false, restauracao: 'adiado' };
+      }
+      const restauracao = await this.restaurarPreferenciaDoUsuario(slot, { adiar: campoEmUso });
+      slot.lightRestauracao = restauracao;
+      this.onChange?.(slot);
+      return { ok: true, restauracao };
     });
   }
 
   /**
-   * Reaplica num carregamento novo. Se o jogo voltou para Economia/Ultra (a
-   * preferência vive no localStorage), zera e recarrega — com uma trava de
-   * 10 s para o caso de o jogo reescrever a preferência em loop. Dentro da
-   * trava, sai pela cena (é o jogo que avisa o servidor) e segue aplicando.
+   * Religa a preferencia que o usuario tinha (Economia/Ultra) depois que o
+   * modo leve acabou. Com AUTO/rota rodando o campo ainda e preciso: a
+   * restauracao fica pendente e quem a faz e o stop() do AUTO/rota.
+   *
+   * Nao sobrescreve uma escolha mais nova do usuario: se a pagina ja esta com
+   * a preferencia ligada, nao ha o que restaurar.
+   *
+   * CHAMADA DE DENTRO DA FILA (o disable ja e serializado): nao enfileira
+   * aqui, senao a fila esperaria por ela mesma.
+   */
+  async restaurarPreferenciaDoUsuario(slot, { adiar = false } = {}) {
+    const prefs = LightMode.juntaPreferencias(slot.prefsEconomiaDoUsuario, slot.prefsEconomiaPendente);
+    if (!prefs) return 'nada-a-restaurar';
+    if (adiar) {
+      // pendente nunca e rebaixada: so Some quando ela for restaurada
+      slot.prefsEconomiaPendente = LightMode.juntaPreferencias(slot.prefsEconomiaPendente, prefs);
+      console.info(
+        `[${slot.id}] modo leve: preferencia do usuario guardada para restaurar quando o AUTO/rota pararem`
+      );
+      return 'adiado';
+    }
+    const wc = slot.view?.webContents;
+    if (!wc || wc.isDestroyed() || !/^https?:/i.test(wc.getURL())) return 'falhou';
+    const atual = await wc.executeJavaScript(LIGHT_PREFS_READ, true).catch(() => null);
+    if (!atual) return 'falhou';
+    let feito = true;
+    if (prefs.economia && atual.economia !== true) {
+      const r = await wc.executeJavaScript(LIGHT_LIGAR_ECONOMIA, true).catch(() => 'erro');
+      if (r !== 'ok') feito = false;
+    }
+    if (prefs.ultra && atual.ultra !== true) {
+      const r = await wc.executeJavaScript(LIGHT_LIGAR_ULTRA, true).catch(() => 'erro');
+      if (r !== 'ok') feito = false;
+    }
+    if (!feito) {
+      console.error(`[${slot.id}] modo leve: nao consegui religar a preferencia do usuario`);
+      slot.prefsEconomiaPendente = LightMode.juntaPreferencias(slot.prefsEconomiaPendente, prefs);
+      return 'falhou';
+    }
+    // confirma: a preferencia realmente voltou? (o clique pode nao agir)
+    const depois = await wc.executeJavaScript(LIGHT_PREFS_READ, true).catch(() => null);
+    if (depois && ((prefs.economia && !depois.economia) || (prefs.ultra && !depois.ultra))) {
+      console.error(`[${slot.id}] modo leve: o clique nao religou a preferencia do usuario`);
+      slot.prefsEconomiaPendente = LightMode.juntaPreferencias(slot.prefsEconomiaPendente, prefs);
+      return 'falhou';
+    }
+    slot.prefsEconomiaDoUsuario = null;
+    slot.prefsEconomiaPendente = null;
+    console.info(`[${slot.id}] modo leve: preferencia do usuario restaurada`);
+    return 'restaurado';
+  }
+
+  /**
+   * Consome a restauracao pendente — chamado quando o AUTO/rota param e o
+   * campo deixa de ser preciso. Passa pela fila da sessao: mexer no jogo
+   * enquanto um toggle esta em andamento seria mexer em dois estados.
+   */
+  async restaurarPreferenciaAposPararDoAUTO(slot) {
+    if (!slot.prefsEconomiaPendente) return 'nada-a-restaurar';
+    // Com o modo leve LIGADO, o jogo esta fora do Economia de proposito:
+    // religar agora brigaria com a vigia (que sairia de novo em 20 s) e o
+    // botao do jogo zeraria a preferencia de novo. A pendencia espera.
+    if (slot.lightMode === true) return 'adiado';
+    return this.queue(slot, async () => {
+      if (!slot.prefsEconomiaPendente) return 'nada-a-restaurar';
+      slot.prefsEconomiaDoUsuario = LightMode.juntaPreferencias(
+        slot.prefsEconomiaDoUsuario,
+        slot.prefsEconomiaPendente
+      );
+      return this.restaurarPreferenciaDoUsuario(slot, { adiar: false });
+    });
+  }
+
+  /**
+   * Reaplica num carregamento novo (o CSS e o patch de rAF sao por documento).
+   * Se o jogo voltou para Economia/Ultra, sai pelo botao do jogo — sem
+   * recarregar. O reload com preferencia zerada e o ultimo recurso (com trava
+   * de 10 s para o caso de o jogo reescrever a preferencia em loop).
    */
   async sync(slot) {
     if (!slot.lightMode) return;
@@ -117,20 +318,32 @@ export class LightMode {
       const gen = slot.lightGen ?? 0;
       const wc = slot.view.webContents;
       if (wc.isDestroyed() || !/^https?:/i.test(wc.getURL())) return;
-      const dirty = await wc.executeJavaScript(LIGHT_PREFS_ON, true).catch(() => false);
+      const estado = await wc.executeJavaScript(LIGHT_EM_ECONOMIA, true).catch(() => 'erro');
       if (this.stale(slot, wc, gen)) return;
-      if (dirty) {
-        const now = Date.now();
-        const off = await wc.executeJavaScript(LIGHT_PREFS_OFF, true).catch(() => false);
+      if (estado === 'economia' || estado === 'ultra') {
+        // primeira vez que esta sessao e tocada com o modo leve ligado (o
+        // launcher pode ter reiniciado): guarda a preferencia do usuario antes
+        // de o jogo zera a chave. Uma preferencia ja lembrada NUNCA volta de
+        // '1' para '0' — religar a economia e escolha do usuario.
+        const prefs = await this.lerPreferenciaDoUsuario(slot);
+        if (prefs) {
+          slot.prefsEconomiaDoUsuario = LightMode.juntaPreferencias(slot.prefsEconomiaDoUsuario, prefs);
+        }
+        const saiu = await this.sairDoEconomiaPeloJogo(slot);
         if (this.stale(slot, wc, gen)) return;
-        if (!off) {
-          console.error(`[${slot.id}] modo leve: localStorage recusou desligar Economia/Ultra`);
-        } else if (!slot.lightReloadAt || now - slot.lightReloadAt >= 10_000) {
-          slot.lightReloadAt = now;
-          wc.reload();
-          return;
-        } else {
-          console.error(`[${slot.id}] modo leve: Economia/Ultra voltou; modo mantido e a vigia sai pela cena`);
+        if (saiu !== 'saiu-economia' && saiu !== 'saiu-ultra') {
+          // ultimo recurso: preferencia zerada + reload (com trava de 10 s)
+          const now = Date.now();
+          const off = await wc.executeJavaScript(LIGHT_PREFS_OFF, true).catch(() => false);
+          if (!off) {
+            console.error(`[${slot.id}] modo leve: localStorage recusou desligar Economia/Ultra`);
+          } else if (!slot.lightReloadAt || now - slot.lightReloadAt >= 10_000) {
+            slot.lightReloadAt = now;
+            wc.reload();
+            return;
+          } else {
+            console.error(`[${slot.id}] modo leve: Economia/Ultra voltou; modo mantido e a vigia sai pela cena`);
+          }
         }
       }
       await this.applyNow(slot);
@@ -193,19 +406,33 @@ export class LightMode {
 
   /**
    * Vigia o modo do jogo: se ele voltar para Economia/Ultra pelo menu dele,
-   * o servidor para de mandar `campo` e o AUTO fica sem alvo. A volta é pelo
-   * botão da cena — o próprio jogo avisa o servidor quando sai.
+   * o servidor para de mandar `campo` e o AUTO fica sem alvo. A volta e pelo
+   * botao da cena — o proprio jogo avisa o servidor quando sai. De quebra
+   * confere se o patch de rAF ainda e o nosso (a remontagem da cena nao o
+   * quebra; um reload sim, e o sync cobre isso).
    */
   async watch(slot) {
     if (!slot.lightMode) return 'off';
     const wc = slot.view.webContents;
     if (wc.isDestroyed() || !/^https?:/i.test(wc.getURL())) return 'off';
-    const res = await wc.executeJavaScript(LIGHT_WATCH, true).catch(() => 'error');
-    if (res === 'exit-economy' || res === 'exit-ultra') {
-      const nome = res === 'exit-economy' ? 'Modo Economia' : 'Modo ULTRA Economia';
-      console.log(`[${slot.id}] modo leve: saiu do ${nome} para o campo continuar chegando`);
-    }
-    return res;
+    // pela fila: a reaplicacao do CSS/rAF nao pode correr ao lado de um
+    // toggle (duas aplicacoes brigariam pela chave do CSS injetado).
+    return this.queue(slot, async () => {
+      if (!slot.lightMode) return 'off';
+      const gen = slot.lightGen ?? 0;
+      const res = await wc.executeJavaScript(LIGHT_WATCH, true).catch(() => 'error');
+      if (res === 'exit-economy' || res === 'exit-ultra') {
+        const nome = res === 'exit-economy' ? 'Modo Economia' : 'Modo ULTRA Economia';
+        console.info(`[${slot.id}] modo leve: saiu do ${nome} para o campo continuar chegando`);
+      }
+      if (res !== 'error' && !this.stale(slot, wc, gen)) {
+        const ok = await wc.executeJavaScript(LIGHT_VERIFY, true).catch(() => false);
+        if (ok !== true && !this.stale(slot, wc, gen)) {
+          await this.applyNow(slot);
+        }
+      }
+      return res;
+    });
   }
 
 }

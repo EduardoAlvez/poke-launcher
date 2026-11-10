@@ -170,7 +170,12 @@
         }
         const limit = Math.max(1, config.maxPerMin ?? 20);
         if (isEconomy(doc, pack)) {
-          const exit = config.exitEconomy !== false && pack?.economyExitSelector
+          // Com o modo leve ligado, o DONO da preferencia de Economia e o
+          // launcher (ele a lembra e restaura no fim). O AUTO nao mexe nela,
+          // senao os dois se anulam: o AUTO sairia do economia aqui e o
+          // proprio stop() dele voltaria a ligar — ping-pong sem alvo.
+          const gerencia = config.gerenciaEconomia === true;
+          const exit = config.exitEconomy !== false && !gerencia && pack?.economyExitSelector
             ? findFirst(doc, [pack.economyExitSelector])
             : null;
           if (exit) {
@@ -218,8 +223,12 @@
       if (heartbeat && typeof win.clearInterval === 'function') win.clearInterval(heartbeat);
       heartbeat = null;
       if (economyExited && reason !== 'reconfigurado' && pack?.economyEnterSelector) {
-        const enter = findFirst(doc, [pack.economyEnterSelector]);
-        if (enter) clickTarget(enter, doc);
+        // O modo leve sendo o dono da preferencia, o AUTO nao religa a economia
+        // ao parar: quem restaura e o launcher (restaurarPreferenciaAposPararDoAUTO).
+        if (config.gerenciaEconomia !== true) {
+          const enter = findFirst(doc, [pack.economyEnterSelector]);
+          if (enter) clickTarget(enter, doc);
+        }
       }
       economyExited = false;
       report(reason);

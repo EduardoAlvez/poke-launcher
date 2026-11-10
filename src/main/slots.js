@@ -138,6 +138,9 @@ export class SlotRegistry {
       lightGen: 0,
       lightReloadAt: 0,
       lightQueue: Promise.resolve(),
+      // preferencia de Economia/ULTRA que o usuario tinha antes do modo leve
+      prefsEconomiaDoUsuario: null,
+      prefsEconomiaPendente: null,
     };
     view.webContents.on('render-process-gone', () => this.recreate(slot));
     view.webContents.on('did-finish-load', () =>
@@ -215,8 +218,8 @@ export class SlotRegistry {
     return this.lightMode.enable(slot);
   }
 
-  disableLight(slot) {
-    return this.lightMode.disable(slot);
+  disableLight(slot, opts) {
+    return this.lightMode.disable(slot, opts);
   }
 
   syncLight(slot) {
@@ -225,6 +228,14 @@ export class SlotRegistry {
 
   watchLight(slot) {
     return this.lightMode.watch(slot);
+  }
+
+  /**
+   * Consome a restauracao pendente da preferencia do usuario: chamada quando
+   * o AUTO ou a rota param e o campo deixa de ser preciso.
+   */
+  restaurarPreferenciaDoUsuario(slot) {
+    return this.lightMode.restaurarPreferenciaAposPararDoAUTO(slot);
   }
 
   setViewsVisible(visible) {

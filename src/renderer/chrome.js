@@ -121,6 +121,14 @@ function openModal(slot) {
   modalSlot.textContent = `Sessão: ${slot.name}`;
   modalConsent.checked = slot.automation?.enabled === true;
   modalExitEco.checked = slot.automation?.exitEconomy !== false;
+  // Com o modo leve ligado, quem decide a preferencia de Economia e o
+  // launcher (ele a lembra e devolve). Deixar a caixa editavel mostraria uma
+  // escolha que nao tem efeito nenhum.
+  modalExitEco.disabled = slot.lightMode === true;
+  modalExitEco.parentElement.classList.toggle('desativado', slot.lightMode === true);
+  modalExitEco.parentElement.title = slot.lightMode === true
+    ? 'Com o modo leve ligado, o launcher e quem guarda e devolve a preferencia de Economia.'
+    : '';
   modalMode.value = slot.automation?.mode ?? 'fixed';
   modalInterval.value = slot.automation?.intervalMs ?? 2000;
   modalJitter.value = slot.automation?.jitterMs ?? 800;
@@ -245,7 +253,7 @@ function createChip() {
   x.setAttribute('role', 'button');
   x.tabIndex = 0;
   chip.appendChild(x);
-  const view = { chip, dot, label, tag, light, auto, slot: null, rename: null };
+  const view = { chip, dot, label, tag, light, auto, slot: null, rename: null, lightError: false, lightNote: '' };
   chip.addEventListener('click', () => view.slot && window.launcher.focusSlot(view.slot.id));
   chip.addEventListener('contextmenu', (e) => {
     e.preventDefault();
@@ -315,9 +323,15 @@ function createChip() {
     if (!view.slot) return;
     try {
       const res = await window.launcher.setLightMode(view.slot.id, !view.slot.lightMode);
-      view.lightError = !(res?.ok && res?.applied !== false);
+      view.lightError = !(res?.ok && res?.aplicado !== false);
+      if (res?.motivo === 'fallback-reload') {
+        view.lightNote = 'O jogo nao tinha o botao de sair do Economia: a sessao recarregou (ultimo recurso).';
+      } else {
+        view.lightNote = '';
+      }
     } catch {
       view.lightError = true;
+      view.lightNote = '';
     }
     if (view.slot) updateChip(view, view.slot);
   });
@@ -345,11 +359,22 @@ function updateChip(view, s) {
   const light = s.lightMode === true;
   const failed = view.lightError || s.lightFailed === true;
   view.light.className = `light${light ? ' on' : ''}${failed ? ' error' : ''}`;
+  // O estado da restauracao vem do MAIN (nao do clique): a pendencia pode ser
+  // resolvida depois (quando o AUTO/rota param), e a UI nao pode continuar
+  // dizendo "vai voltar" quando ja voltou.
+  const restauracao = s.lightRestauracao ?? null;
+  const nota = restauracao === 'adiado'
+    ? 'A preferencia de Economia/Ultra do usuario volta quando a automacao ou a rota pararem.'
+    : restauracao === 'falhou'
+      ? 'Nao consegui religar a preferencia de Economia/Ultra do usuario.'
+      : '';
   view.light.title = failed
     ? 'Modo leve nao aplicado nesta sessao (o jogo recusou a preferencia ou o rAF nao pode ser limitado). Clique para tentar de novo.'
-    : light
-      ? 'Modo leve ligado: cena oculta e CPU poupado; os lancamentos seguem'
-      : 'Modo leve desligado: clique para ocultar a cena e poupar CPU sem parar os lancamentos';
+    : nota
+      ? nota
+      : light
+        ? 'Modo leve ligado: cena oculta e CPU poupado; os lancamentos seguem. Se o jogo estava em Economia/Ultra, o launcher saiu pelo botao do jogo e devolve a sua preferencia no fim.'
+        : 'Modo leve desligado: clique para ocultar a cena e poupar CPU sem parar os lancamentos';
   const enabled = s.automation?.enabled === true;
   view.auto.className = `auto${enabled ? ' on' : ''}`;
   view.auto.dataset.state = s.autoState ?? 'idle';

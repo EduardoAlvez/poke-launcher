@@ -33,8 +33,9 @@ Baixe o instalador na página de releases:
   - extensão `/hunt for PokeIdle` baixada da Chrome Web Store e carregada por sessão;
   - regras de notificação com âncoras por classe CSS.
 - **Automação de lançamentos (opt-in)** — veja o aviso abaixo.
-- **Modo leve por sessão** (`LEVE` no chip) — cena oculta e rAF limitado, sem parar a caça
-  nem os lançamentos; pensado para notebook fraco.
+- **Modo leve por sessão** (`LEVE` no chip) — cena oculta e rAF limitado, **sem recarregar** e sem
+  parar a caça nem os lançamentos; a sua preferência de Economia/Ultra é guardada e devolvida no fim.
+  Pensado para notebook fraco.
 - **Painel de caça por sessão** (`Caça` na toolbar, opt-in e só leitura) — mostra a área atual,
   o que a dex já tem e quais espécies faltam; e a **rota "capturar um por um"** (automação opt-in
   que viaja e captura os faltantes em fila). Veja os avisos abaixo.
@@ -69,16 +70,26 @@ mais o campo** — sem campo não existe lista de captura e o AUTO não tem onde
 faz o oposto: mantém o campo chegando e corta o custo por fora.
 
 - liga/desliga por sessão no botão **LEVE** do chip (fica azul quando ativo);
-- zera `cfg-economia` e `cfg-ultra` do jogo e recarrega a sessão ao ligar (o jogo relê a escolha);
+- **sem recarregar**: se o jogo estiver em Economia/Ultra, o launcher sai pelo **botão do próprio
+  jogo** ("Ligar a cena"), que é quem avisa o servidor para voltar a mandar o campo;
+- **a sua preferência volta no fim**: o launcher guarda se você tinha Economia/Ultra ligado **antes**
+  de mexer no jogo (o botão do jogo zera a chave ao sair). Ao desligar o modo leve, a preferência é
+  religada pelo atalho da cena. Se o AUTO ou a rota ainda estiverem rodando, a volta é **adiada**
+  para quando eles pararem — o chip avisa isso no tooltip;
 - esconde a `#cena` e pausa animações por CSS, e limita o `requestAnimationFrame` a ~3 quadros/s
   (o laço da cena se reagenda por ele); a lista de caídos é montada por timer a partir do servidor;
-- ao desligar, devolve o rAF original e remove o CSS, sem recarregar. O jogo continua fora do
-  Economia/Ultra até você religar no menu dele;
+- ao desligar, devolve o rAF original e remove o CSS, sem recarregar;
 - a cada 20 s o launcher vigia a sessão: se o jogo voltar para Economia/Ultra pelo menu dele,
   o launcher sai pela cena (é o próprio jogo que avisa o servidor) para o campo continuar chegando.
   Com o modo leve ligado, o jogo fica fora do Economia/Ultra — inclusive quando a automação para;
 - o limitador envolve o `requestAnimationFrame` global da página: se o jogo instalar o dele
-  depois, o limitador é reaplicado por cima (ou o jogo passa a comando, se ele assumir o controle).
+  depois, o limitador é reaplicado por cima (ou o jogo passa a comando, se ele assumir o controle);
+- se o jogo **não tiver** o botão de sair do Economia (versão diferente), o launcher cai no último
+  recurso: zera `cfg-economia`/`cfg-ultra` e recarrega a sessão uma vez, com trava de 10 s para não
+  entrar em loop.
+
+Com o modo leve ligado, o **AUTO não mexe** na sua preferência de Economia (é o launcher que a
+guarda e devolve): sem isso os dois brigariam e o campo pararia de chegar.
 
 O custo esperado fica próximo do Modo Economia do jogo, mas com o `campo` ainda chegando — é isso
 que permite lançar bola numa máquina fraca.

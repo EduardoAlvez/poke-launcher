@@ -379,6 +379,53 @@ test('exitEconomy=false nao mexe no Modo Economia', () => {
   handle.stop();
 });
 
+test('gerenciaEconomia=true: o AUTO nao mexe na preferencia do usuario', () => {
+  // Com o modo leve ligado, o DONO da preferencia de Economia e o launcher
+  // (ele a lembra e restaura no fim). O AUTO nao pode sair do Economia nem
+  // voltar a ligar: os dois brigariam e o campo pararia de chegar.
+  let eco = true;
+  let exits = 0;
+  let enters = 0;
+  const doc = {
+    body: { textContent: '' },
+    defaultView: null,
+    querySelector: (sel) => {
+      if (sel === 'html.modo-economia') return eco ? {} : null;
+      if (sel === '#eco-sair') return eco ? { textContent: '', hidden: false, click: () => { eco = false; exits += 1; } } : null;
+      if (sel === '.hunt-eco') return eco ? null : { textContent: '', hidden: false, click: () => { enters += 1; } };
+      return null;
+    },
+  };
+  const events = [];
+  let tickFn = null;
+  const win = {
+    crypto: { getRandomValues: (arr) => { arr[0] = 1; return arr; } },
+    setTimeout: (fn) => { tickFn = fn; return 1; },
+    clearTimeout: () => {},
+    setInterval: () => 2,
+    clearInterval: () => {},
+  };
+  const handle = installAutomation({
+    config: { enabled: true, exitEconomy: true, gerenciaEconomia: true, intervalMs: 500, jitterMs: 0, maxPerMin: 60 },
+    pack: {
+      clickCandidates: ['#caidos-lista .caido'],
+      economySelector: 'html.modo-economia',
+      economyExitSelector: '#eco-sair',
+      economyEnterSelector: '.hunt-eco',
+      pauseSelectors: [],
+      pauseText: [],
+    },
+    emit: (e) => events.push(e),
+    doc,
+    win,
+  });
+  tickFn();
+  assert.equal(exits, 0, 'o AUTO nao saiu do Economia: quem manda e o launcher');
+  assert.equal(events.at(-1).state, 'economy-mode');
+  handle.stop('captured');
+  assert.equal(enters, 0, 'o AUTO nao religa a preferencia ao parar');
+});
+
 test('until-catch so para perto de um arremesso', async () => {
   let clicks = 0;
   const doc = {

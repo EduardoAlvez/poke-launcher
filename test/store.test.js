@@ -314,6 +314,28 @@ test('buildSnapshot preserva o opt-in da leitura da dex', async () => {
   assert.equal(sem.slots[0].dexWatch, false);
 });
 
+test('parseSlot: a preferencia lembrada do modo leve sobrevive ao reinicio', () => {
+  assert.equal(parseSlot(validSlot).slot.prefsEconomia, null);
+  const comPref = parseSlot({ ...validSlot, prefsEconomia: { economia: true, ultra: false } });
+  assert.deepEqual(comPref.slot.prefsEconomia, { economia: true, ultra: false });
+  // nada ligado = nada a guardar (nao suja o slots.json)
+  assert.equal(parseSlot({ ...validSlot, prefsEconomia: { economia: false, ultra: false } }).slot.prefsEconomia, null);
+  assert.equal(parseSlot({ ...validSlot, prefsEconomia: 'sim' }).slot.prefsEconomia, null);
+  const pendente = parseSlot({ ...validSlot, prefsEconomiaPendente: { economia: true, ultra: true } });
+  assert.deepEqual(pendente.slot.prefsEconomiaPendente, { economia: true, ultra: true });
+});
+
+test('buildSnapshot preserva a preferencia lembrada do modo leve', async () => {
+  const { buildSnapshot } = await import('../src/main/store.js');
+  const anterior = { schemaVersion: 1, maxSlots: 2, slots: [], scripts: [] };
+  const snap = buildSnapshot(anterior, [
+    { id: 'slot-1', name: 'A', url: 'https://pokeidle.io/app', prefsEconomiaDoUsuario: { economia: true, ultra: false } },
+  ]);
+  assert.deepEqual(snap.slots[0].prefsEconomia, { economia: true, ultra: false });
+  const sem = buildSnapshot(anterior, [{ id: 'slot-2', name: 'B', url: 'https://pokeidle.io/app' }]);
+  assert.equal(sem.slots[0].prefsEconomia, null);
+});
+
 test('buildSnapshot preserva eco e a lista de scripts', async () => {
   const { buildSnapshot } = await import('../src/main/store.js');
   const previous = { schemaVersion: 1, maxSlots: 2, slots: [], scripts: [validScript] };

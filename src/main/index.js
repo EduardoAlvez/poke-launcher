@@ -31,7 +31,7 @@ function getLog() {
 // No build empacotado o stdout e descartado: espelha o diagnostico do main no
 // arquivo para o log nao ficar so com stack trace de excecao.
 const fileLog = getLog();
-for (const level of ['error', 'warn']) {
+for (const level of ['error', 'warn', 'info']) {
   const original = console[level].bind(console);
   console[level] = (...args) => {
     fileLog[level](formatArgs(args));
@@ -84,7 +84,10 @@ const automation = new AutomationController({
     const slot = registry.get(slotId);
     if (!slot) return;
     if (slot.view.webContents.isDestroyed()) return;
-    slot.view.webContents.send('automation:config', { config: payload.config, pack: automationPack });
+    // Com o modo leve ligado (e realmente aplicado), o launcher e o dono da
+    // preferencia de Economia: o AUTO nao a mexe (ver automation.js).
+    const config = { ...payload.config, gerenciaEconomia: gerenciaEconomiaDoSlot(slot) };
+    slot.view.webContents.send('automation:config', { config, pack: automationPack });
   },
 });
 
@@ -100,6 +103,30 @@ const route = new RouteController({
   },
   onChange: () => sendState(),
 });
+
+/**
+ * O launcher e o dono da preferencia de Economia/Ultra so quando o modo leve
+ * esta LIGADO E APLICADO. Um modo leve quebrado (o rAF nao pode ser limitado)
+ * nao segura a preferencia — e o AUTO volta a cuidar dela como antes.
+ */
+function gerenciaEconomiaDoSlot(slot) {
+  return slot?.lightMode === true && slot?.lightApplied === true;
+}
+
+/**
+ * Quando o AUTO ou a rota param, o campo deixa de ser preciso: e a hora de
+ * religar a preferencia de Economia/Ultra que o usuario tinha (se o modo leve
+ * guardou alguma). Sem isso, a preferencia ficaria apagada para sempre — o
+ * defeito que o modo leve sem reload promete consertar.
+ */
+async function restaurarPreferenciaSeParou(slotId) {
+  const slot = registry.get(slotId);
+  if (!slot) return;
+  if (slot.automation?.enabled === true || route.isActiveRunning(slotId)) return;
+  await registry.restaurarPreferenciaDoUsuario(slot).catch((err) => {
+    console.error(`[${slotId}] modo leve: restaurar preferencia falhou:`, err.message);
+  });
+}
 
 const notifier = new Notifier({
   show: ({ slotId, title, body }) => {
@@ -165,6 +192,7 @@ function pushState() {
       lightMode: s.lightMode === true,
       lightApplied: s.lightApplied === true,
       lightFailed: s.lightFailed === true,
+      lightRestauracao: s.lightRestauracao ?? null,
       muted: s.muted === true,
       zoomFactor: s.zoomFactor ?? 1,
       eco: s.eco === true,
@@ -299,7 +327,10 @@ function wireAddonPack() {
       }
       if (!isMainView) return;
       if (slot?.automation?.enabled) {
-        contents.send('automation:config', { config: slot.automation, pack: automationPack });
+        contents.send('automation:config', {
+          config: { ...slot.automation, gerenciaEconomia: gerenciaEconomiaDoSlot(slot) },
+          pack: automationPack,
+        });
       }
       if (route.isActiveRunning(slot.id)) {
         // a maquina da rota morreu junto com o documento anterior: reenvia a fila
@@ -351,6 +382,10 @@ async function restoreSlots() {
         created.lightMode = slot.lightMode === true;
         created.eco = slot.eco === true;
         created.dexWatch = slot.dexWatch === true;
+        // a preferencia lembrada volta com o launcher (modo leve pode ter
+        // ficado ligado na sessao anterior).
+        created.prefsEconomiaDoUsuario = slot.prefsEconomia ? { ...slot.prefsEconomia } : null;
+        created.prefsEconomiaPendente = slot.prefsEconomiaPendente ? { ...slot.prefsEconomiaPendente } : null;
         registry.applySlotPrefs(created);
         if (slot.automation) {
           created.automation = { ...slot.automation, enabled: false };
@@ -754,7 +789,11 @@ ipcMain.handle('launcher:route-set', async (event, payload) => {
       pack: automationPack,
     });
   }
-  return route.stop(slot.id, 'desligada');
+  const res = await route.stop(slot.id, 'desligada');
+  // a rota parou: se o AUTO tambem parou, o campo nao e mais preciso e a
+  // preferencia de Economia/Ultra do usuario volta.
+  await restaurarPreferenciaSeParou(slot.id);
+  return res;
 });
 
 ipcMain.handle('route:risk-text', (event) => {
@@ -812,15 +851,34 @@ ipcMain.handle('launcher:set-light', async (event, payload) => {
   const slot = registry.get(payload?.id);
   if (!slot) return { ok: false, error: 'sessao inexistente' };
   const on = payload?.on === true;
-  const applied = on ? await registry.enableLight(slot) : await registry.disableLight(slot);
+  // Com AUTO ou rota rodando, o campo ainda e preciso: a preferencia do usuario
+  // (Economia/Ultra) fica PENDENTE de restaurar, nao e esquecida.
+  const campoEmUso = slot.automation?.enabled === true || route.isActiveRunning(slot.id);
+  const res = on ? await registry.enableLight(slot) : await registry.disableLight(slot, { campoEmUso });
+  // O AUTO rodando precisa saber de quem e a preferencia de Economia agora.
+  // Mando um canal proprio (nao a config inteira): reenviar a config reinicia
+  // o motor e zera a cota de arremessos do minuto.
+  if (slot.automation?.enabled === true) {
+    const wc = slot.view?.webContents;
+    if (wc && !wc.isDestroyed()) wc.send('automation:gerencia', gerenciaEconomiaDoSlot(slot));
+  }
   await persist();
   sendState();
-  return { ok: true, lightMode: slot.lightMode === true, applied };
+  return {
+    ok: res?.ok !== false,
+    lightMode: slot.lightMode === true,
+    aplicado: res?.ok === true,
+    restauracao: res?.restauracao ?? null,
+    motivo: res?.motivo ?? null,
+  };
 });
 
 ipcMain.handle('automation:set', async (event, payload) => {
   if (!isChrome(event.sender)) return { ok: false, error: 'origem invalida' };
   const res = await automation.setConfig(payload?.id, payload?.config);
+  // o AUTO pode ter parado aqui: a preferencia de Economia/Ultra volta se o
+  // campo deixar de ser preciso.
+  if (payload?.config?.enabled !== true) await restaurarPreferenciaSeParou(payload?.id);
   sendState();
   return res;
 });
@@ -829,6 +887,7 @@ ipcMain.handle('automation:stop-all', async (event) => {
   if (!isChrome(event.sender)) return false;
   await automation.stopAll();
   await route.stopAll();
+  for (const slot of registry.slots) await restaurarPreferenciaSeParou(slot.id);
   sendState();
   return true;
 });
@@ -921,9 +980,11 @@ app.whenReady().then(async () => {
       },
       isMuted: notifier.muted,
       onStopAutomation: () => {
-        automation.stopAll();
-        route.stopAll();
-        sendState();
+        // promessa flutuante vira unhandledRejection se a persistencia falhar
+        Promise.all([automation.stopAll(), route.stopAll()])
+          .then(() => Promise.all(registry.slots.map((s) => restaurarPreferenciaSeParou(s.id))))
+          .catch((err) => console.error('[bandeja] parar automacoes:', err?.message ?? err))
+          .finally(() => sendState());
       },
       onQuit: () => {
         quitting = true;
@@ -1003,6 +1064,9 @@ app.on('web-contents-created', (_e, contents) => {
         .markStopped(slot.id, 'captured')
         .then((changed) => {
           if (changed) sendState();
+          // o AUTO parou: o campo pode deixar de ser preciso, entao a
+          // preferencia de Economia/Ultra do usuario volta.
+          return restaurarPreferenciaSeParou(slot.id);
         })
         .catch((err) => console.error('[automation] parada pos-captura:', err.message));
     }

@@ -3,8 +3,9 @@ import path from 'node:path';
 
 /**
  * Log em arquivo com rotacao. A escrita e sincrona de proposito: ela so
- * acontece em erro/excecao, e nesse momento o evento ja se perdeu se a
- * gravacao falhar. Nunca lanca — um log quebrado nao pode derrubar o app.
+ * acontece em erro/excecao e nos avisos de diagnostico, e nesse momento o
+ * evento ja se perdeu se a gravacao falhar. Nunca lanca — um log quebrado
+ * nao pode derrubar o app.
  */
 export function openLog(filePath, { maxBytes = 1_000_000, now = () => new Date(), keep = 1 } = {}) {
   const rotate = () => {

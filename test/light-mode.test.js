@@ -7,19 +7,70 @@ const URL_JOGO = 'https://pokeidle.io/app';
 /**
  * webContents falso: roda os scripts do modo leve contra uma `window` falsa,
  * como o navegador faria, e guarda o que foi inserido.
+ *
+ * A `page` emula o JOGO: as classes do html (modo-economia/modo-ultra), os
+ * botoes (#eco-sair, #hunt-eco, #ultra-sair, #cfg-ultra) e o efeito do
+ * clique: o jogo real zera a preferencia ao sair do Modo Economia.
  */
-function fakeWebContents({ url = URL_JOGO, destroy = false, failRaf = false } = {}) {
+function fakeWebContents({
+  url = URL_JOGO,
+  destroy = false,
+  failRaf = false,
+  botoes = ['eco-sair', 'hunt-eco', 'ultra-sair', 'cfg-ultra'],
+  jogoLimpaPref = true,
+} = {}) {
+  const classes = new Set();
+  const store = new Map([
+    ['cfg-economia', '0'],
+    ['cfg-ultra', '0'],
+  ]);
+  const cliques = [];
+  const els = new Map();
+  for (const id of botoes) {
+    els.set(`#${id}`, {
+      id,
+      disabled: false,
+      getBoundingClientRect: () => ({ width: 120, height: 24 }),
+      click: () => {
+        cliques.push(id);
+        if (id === 'eco-sair') {
+          classes.delete('modo-economia');
+          if (jogoLimpaPref) store.set('cfg-economia', '0');
+        }
+        if (id === 'hunt-eco') {
+          classes.add('modo-economia');
+          store.set('cfg-economia', '1');
+        }
+        if (id === 'ultra-sair') {
+          classes.delete('modo-ultra');
+          if (jogoLimpaPref) store.set('cfg-ultra', '0');
+        }
+        if (id === 'cfg-ultra') {
+          classes.add('modo-ultra');
+          store.set('cfg-ultra', '1');
+        }
+      },
+    });
+  }
+  const classList = {
+    contains: (c) => classes.has(c),
+    add: (c) => classes.add(c),
+    remove: (c) => classes.delete(c),
+  };
+  const page = {
+    documentElement: { classList },
+    querySelector: (sel) => els.get(sel) ?? null,
+    body: { textContent: '' },
+  };
   const win = {
+    document: page,
     requestAnimationFrame: (cb) => {
       win.__frames.push(cb);
       return win.__frames.length;
     },
     cancelAnimationFrame: () => {},
     localStorage: {
-      store: new Map([
-        ['cfg-economia', '0'],
-        ['cfg-ultra', '0'],
-      ]),
+      store,
       getItem(k) {
         return this.store.has(k) ? this.store.get(k) : null;
       },
@@ -27,14 +78,19 @@ function fakeWebContents({ url = URL_JOGO, destroy = false, failRaf = false } = 
         this.store.set(k, String(v));
       },
     },
-    document: {
-      documentElement: { classList: { contains: () => false } },
-      querySelector: () => null,
-    },
     getComputedStyle: () => ({ display: 'block', visibility: 'visible' }),
     __frames: [],
   };
-  const state = { css: new Map(), nextCss: 1, reloads: 0, destroyed: destroy, url };
+  const state = {
+    css: new Map(),
+    nextCss: 1,
+    reloads: 0,
+    destroyed: destroy,
+    url,
+    classes,
+    store,
+    cliques,
+  };
   const wc = {
     isDestroyed: () => state.destroyed,
     getURL: () => state.url,
@@ -54,12 +110,13 @@ function fakeWebContents({ url = URL_JOGO, destroy = false, failRaf = false } = 
       if (failRaf && code.includes('window.requestAnimationFrame = wrapped')) throw new Error('rAF bloqueado');
       const fn = new Function(
         'window',
+        'document',
         'setTimeout',
         'clearTimeout',
         'performance',
         'return ' + code
       );
-      return fn(win, setTimeout, clearTimeout, performance);
+      return fn(win, page, setTimeout, clearTimeout, performance);
     },
   };
   return { wc, win, state };
@@ -76,32 +133,64 @@ function fakeSlot(wc, extra = {}) {
     lightGen: 0,
     lightReloadAt: 0,
     lightQueue: Promise.resolve(),
+    prefsEconomiaDoUsuario: null,
+    prefsEconomiaPendente: null,
     ...extra,
   };
 }
 
-test('ligar em Economia/Ultra zera as preferencias e recarrega a sessao', async () => {
+test('ligar com o jogo em Economia sai pelo botao do jogo, sem recarregar', async () => {
   const { wc, win, state } = fakeWebContents();
   const slot = fakeSlot(wc);
   const light = new LightMode();
+  state.classes.add('modo-economia');
   win.localStorage.setItem('cfg-economia', '1');
-  const applied = await light.enable(slot);
-  assert.equal(applied, true);
+
+  const res = await light.enable(slot);
+  assert.equal(res.ok, true);
   assert.equal(slot.lightMode, true);
-  assert.equal(state.reloads, 1);
-  assert.equal(win.localStorage.getItem('cfg-economia'), '0');
-  assert.equal(win.localStorage.getItem('cfg-ultra'), '0');
+  assert.equal(state.reloads, 0, 'quem esta cacando nao perde a sessao a toa');
+  assert.deepEqual(state.cliques, ['eco-sair'], 'saiu pelo botao do proprio jogo');
+  assert.equal(state.classes.has('modo-economia'), false);
+  assert.equal(slot.prefsEconomiaDoUsuario.economia, true, 'lembrou a preferencia do usuario');
+  assert.equal(state.css.size, 1, 'o modo leve foi aplicado na hora');
+  assert.ok(win.__pokeLauncherLight, 'o limitador entrou no documento atual');
 });
 
-test('ligar com as preferencias limpas aplica na hora, sem recarregar', async () => {
-  const { wc, win, state } = fakeWebContents();
+test('ligar fora do Economia nao clica em nada', async () => {
+  const { wc, state } = fakeWebContents();
   const slot = fakeSlot(wc);
   const light = new LightMode();
-  const applied = await light.enable(slot);
-  assert.equal(applied, true);
-  assert.equal(state.reloads, 0, 'quem esta cacando nao perde a sessao a toa');
+  const res = await light.enable(slot);
+  assert.equal(res.ok, true);
+  assert.equal(state.reloads, 0);
+  assert.deepEqual(state.cliques, [], 'nao mexe no jogo quando nao precisa');
   assert.equal(state.css.size, 1);
-  assert.ok(win.__pokeLauncherLight, 'o limitador entrou no documento atual');
+});
+
+test('ligar com a view morta nao finge que ligou', async () => {
+  const { wc } = fakeWebContents({ destroy: true });
+  const slot = fakeSlot(wc);
+  const light = new LightMode();
+  const res = await light.enable(slot);
+  assert.equal(res.ok, false);
+  assert.equal(res.motivo, 'sessao-morta');
+  assert.equal(slot.lightMode, false);
+});
+
+test('ligar sem o botao do jogo usa o ultimo recurso e guarda a preferencia', async () => {
+  const { wc, win, state } = fakeWebContents({ botoes: [] });
+  const slot = fakeSlot(wc);
+  const light = new LightMode();
+  state.classes.add('modo-economia');
+  win.localStorage.setItem('cfg-economia', '1');
+
+  const res = await light.enable(slot);
+  assert.equal(res.ok, true);
+  assert.equal(res.motivo, 'fallback-reload');
+  assert.equal(state.reloads, 1, 'sem botao do jogo, recarregar e o ultimo recurso');
+  assert.equal(win.localStorage.getItem('cfg-economia'), '0');
+  assert.equal(slot.prefsEconomiaDoUsuario.economia, true, 'a preferencia do usuario nao se perdeu');
 });
 
 test('falha do rAF nao deixa a cena escondida sem economia', async () => {
@@ -124,14 +213,6 @@ test('desligar limpa o aviso de falha do chip', async () => {
   assert.equal(win.__pokeLauncherLight, undefined);
 });
 
-test('ligar com a view morta nao finge que ligou', async () => {
-  const { wc } = fakeWebContents({ destroy: true });
-  const slot = fakeSlot(wc);
-  const light = new LightMode();
-  assert.equal(await light.enable(slot), false);
-  assert.equal(slot.lightMode, false);
-});
-
 test('aplicar esconde a cena e limita o rAF; desligar devolve tudo', async () => {
   const { wc, win, state } = fakeWebContents();
   const slot = fakeSlot(wc, { lightMode: true });
@@ -143,8 +224,8 @@ test('aplicar esconde a cena e limita o rAF; desligar devolve tudo', async () =>
   assert.notEqual(win.requestAnimationFrame, undefined);
   assert.ok(win.__pokeLauncherLight, 'o limitador foi instalado');
 
-  const ok = await light.disable(slot);
-  assert.equal(ok, true);
+  const res = await light.disable(slot);
+  assert.equal(res.ok, true);
   assert.equal(state.css.size, 0, 'o CSS foi removido');
   assert.equal(slot.lightApplied, false);
   assert.equal(win.__pokeLauncherLight, undefined, 'o limitador foi desfeito');
@@ -162,20 +243,177 @@ test('desligar durante uma aplicacao nao deixa o modo ligado', async () => {
   assert.equal(win.__pokeLauncherLight, undefined, 'nenhum limitador sobrou');
 });
 
-test('preferencia suja recarrega uma vez e trava por 10 s', async () => {
+test('desligar restaura a preferencia do usuario pelo botao do jogo', async () => {
+  const { wc, win, state } = fakeWebContents();
+  const slot = fakeSlot(wc);
+  const light = new LightMode();
+  state.classes.add('modo-economia');
+  win.localStorage.setItem('cfg-economia', '1');
+  await light.enable(slot);
+  assert.equal(win.localStorage.getItem('cfg-economia'), '0', 'o jogo zerou a chave ao sair do Economia');
+
+  const res = await light.disable(slot, { campoEmUso: false });
+  assert.equal(res.restauracao, 'restaurado');
+  assert.deepEqual(state.cliques, ['eco-sair', 'hunt-eco'], 'voltou pelo atalho do jogo');
+  assert.equal(win.localStorage.getItem('cfg-economia'), '1', 'a preferencia do usuario voltou');
+  assert.equal(slot.prefsEconomiaDoUsuario, null);
+});
+
+test('desligar com AUTO/rota rodando adia a restauracao ate parar', async () => {
+  const { wc, win, state } = fakeWebContents();
+  const slot = fakeSlot(wc);
+  const light = new LightMode();
+  state.classes.add('modo-economia');
+  win.localStorage.setItem('cfg-economia', '1');
+  await light.enable(slot);
+
+  const res = await light.disable(slot, { campoEmUso: true });
+  assert.equal(res.restauracao, 'adiado');
+  assert.equal(state.cliques.includes('hunt-eco'), false, 'nao religa a economia com o AUTO rodando');
+  assert.equal(slot.prefsEconomiaPendente.economia, true, 'a restauracao ficou guardada');
+
+  const depois = await light.restaurarPreferenciaAposPararDoAUTO(slot);
+  assert.equal(depois, 'restaurado');
+  assert.equal(state.cliques.includes('hunt-eco'), true, 'quando o AUTO para, a preferencia volta');
+  assert.equal(win.localStorage.getItem('cfg-economia'), '1');
+});
+
+test('nao sobrescreve escolha nova do usuario', async () => {
+  const { wc, win, state } = fakeWebContents();
+  const slot = fakeSlot(wc);
+  const light = new LightMode();
+  state.classes.add('modo-economia');
+  win.localStorage.setItem('cfg-economia', '1');
+  await light.enable(slot);
+
+  // o usuario religou a economia durante o modo leve: ja esta ligado, entao
+  // nao ha o que restaurar.
+  state.classes.add('modo-economia');
+  win.localStorage.setItem('cfg-economia', '1');
+  const res = await light.disable(slot, { campoEmUso: false });
+  assert.equal(res.restauracao, 'restaurado');
+  assert.equal(state.cliques.includes('hunt-eco'), false, 'nao clicou por cima da escolha do usuario');
+});
+
+test('sync reaplica o modo leve sem recarregar quando o jogo ja esta fora', async () => {
+  const { wc, state } = fakeWebContents();
+  const slot = fakeSlot(wc, { lightMode: true });
+  const light = new LightMode();
+  await light.sync(slot);
+  assert.equal(state.reloads, 0);
+  assert.equal(state.css.size, 1);
+  assert.equal(slot.lightApplied, true);
+});
+
+test('sync sai pelo botao do jogo quando o Economia volta', async () => {
   const { wc, win, state } = fakeWebContents();
   const slot = fakeSlot(wc, { lightMode: true });
   const light = new LightMode();
+  state.classes.add('modo-economia');
+  win.localStorage.setItem('cfg-economia', '1');
+  await light.sync(slot);
+  assert.equal(state.reloads, 0, 'o botao do jogo resolve: sem reload');
+  assert.deepEqual(state.cliques, ['eco-sair']);
+  assert.equal(state.css.size, 1, 'o modo leve continua aplicado');
+});
+
+test('sync sem botao do jogo recarrega uma vez e trava por 10 s', async () => {
+  const { wc, win, state } = fakeWebContents({ botoes: [] });
+  const slot = fakeSlot(wc, { lightMode: true });
+  const light = new LightMode();
+  state.classes.add('modo-economia');
   win.localStorage.setItem('cfg-economia', '1');
   await light.sync(slot);
   assert.equal(state.reloads, 1, 'recarregou para o jogo sair de Economia');
   assert.equal(win.localStorage.getItem('cfg-economia'), '0', 'a preferencia ficou zerada');
 
   // segunda passagem com a preferencia suja de novo: nao recarrega (trava)
+  state.classes.add('modo-economia');
   win.localStorage.setItem('cfg-economia', '1');
   await light.sync(slot);
   assert.equal(state.reloads, 1, 'nao entrou em loop de reload');
   assert.equal(slot.lightApplied, true, 'o modo leve continua aplicado');
+});
+
+test('watch nao escreve a preferencia do usuario', async () => {
+  // o botao do jogo NAO zera a chave aqui: se a preferencia mudar, foi o
+  // launcher que escreveu — e ele nao pode.
+  const { wc, win, state } = fakeWebContents({ jogoLimpaPref: false });
+  const slot = fakeSlot(wc, { lightMode: true });
+  const light = new LightMode();
+  state.classes.add('modo-economia');
+  win.localStorage.setItem('cfg-economia', '1');
+
+  const res = await light.watch(slot);
+  assert.equal(res, 'exit-economy');
+  assert.deepEqual(state.cliques, ['eco-sair']);
+  assert.equal(win.localStorage.getItem('cfg-economia'), '1', 'a vigia nao mexe na preferencia');
+});
+
+test('a preferencia lembrada sobrevive a dois ciclos de modo leve', async () => {
+  // Cenario que a revisao achou: enable -> disable (AUTO rodando, fica
+  // pendente) -> enable de novo -> disable (AUTO rodando). A preferencia do
+  // usuario nao pode virar 'false' no meio do caminho.
+  const { wc, win, state } = fakeWebContents();
+  const slot = fakeSlot(wc);
+  const light = new LightMode();
+  state.classes.add('modo-economia');
+  win.localStorage.setItem('cfg-economia', '1');
+
+  await light.enable(slot);
+  assert.equal(slot.prefsEconomiaDoUsuario.economia, true);
+
+  await light.disable(slot, { campoEmUso: true });
+  assert.equal(slot.prefsEconomiaPendente.economia, true);
+
+  await light.enable(slot);
+  assert.equal(
+    slot.prefsEconomiaDoUsuario.economia,
+    true,
+    'religar o modo leve nao pode apagar a preferencia do usuario'
+  );
+
+  await light.disable(slot, { campoEmUso: true });
+  assert.equal(slot.prefsEconomiaPendente.economia, true, 'a pendencia nunca e rebaixada');
+});
+
+test('com o modo leve ligado a preferencia nao volta (a vigia brigaria)', async () => {
+  const { wc, win, state } = fakeWebContents();
+  const slot = fakeSlot(wc);
+  const light = new LightMode();
+  state.classes.add('modo-economia');
+  win.localStorage.setItem('cfg-economia', '1');
+  await light.enable(slot);
+  await light.disable(slot, { campoEmUso: true });
+  assert.equal(slot.prefsEconomiaPendente.economia, true);
+
+  // o AUTO parou, mas o modo leve voltou a ser ligado: religar agora seria
+  // Fight com a vigia (que sairia de novo em 20 s).
+  slot.lightMode = true;
+  const res = await light.restaurarPreferenciaAposPararDoAUTO(slot);
+  assert.equal(res, 'adiado');
+  assert.equal(state.cliques.includes('hunt-eco'), false, 'nao clicou em #hunt-eco');
+  assert.equal(slot.prefsEconomiaPendente.economia, true, 'a pendencia continua guardada');
+});
+
+test('botao que nao age e tratado como falha (o fallback assume)', async () => {
+  // botao presente, mas o clique nao muda nada: o launcher nao pode
+  // acreditar que saiu do Economia.
+  const { wc, win, state } = fakeWebContents();
+  const botoes = win.document.querySelector('#eco-sair');
+  botoes.click = () => {
+    state.cliques.push('eco-sair');
+  };
+  const slot = fakeSlot(wc);
+  const light = new LightMode();
+  state.classes.add('modo-economia');
+  win.localStorage.setItem('cfg-economia', '1');
+
+  const res = await light.enable(slot);
+  assert.equal(res.ok, true);
+  assert.equal(res.motivo, 'fallback-reload', 'sem efeito no clique, o ultimo recurso assume');
+  assert.equal(state.reloads, 1);
+  assert.equal(slot.prefsEconomiaDoUsuario.economia, true, 'a preferencia continua guardada');
 });
 
 test('a fila serializa as tarefas da sessao', async () => {

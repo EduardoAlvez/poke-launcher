@@ -96,15 +96,12 @@ export const LIGHT_WATCH = `(() => {
   };
   const eco = !!root?.classList.contains('modo-economia');
   const ultra = !!root?.classList.contains('modo-ultra');
+  // O botao do JOGO e quem escreve a preferencia: aplicarEconomia grava sempre
+  // (preferencias.mjs). Nao escrevemos nada aqui — o launcher lembra a
+  // preferencia do usuario ANTES de clicar e restaura depois.
   if (eco) {
     const btn = doc.querySelector('#eco-sair');
     if (visivel(btn)) {
-      try {
-        window.localStorage.setItem('${LIGHT_ECONOMY_KEY}', '0');
-        window.localStorage.setItem('${LIGHT_ULTRA_KEY}', '0');
-      } catch {
-        /* sem preferencia: o clique basta */
-      }
       btn.click();
       return 'exit-economy';
     }
@@ -112,17 +109,82 @@ export const LIGHT_WATCH = `(() => {
   if (ultra) {
     const btn = doc.querySelector('#ultra-sair');
     if (visivel(btn)) {
-      try {
-        window.localStorage.setItem('${LIGHT_ECONOMY_KEY}', '0');
-        window.localStorage.setItem('${LIGHT_ULTRA_KEY}', '0');
-      } catch {
-        /* sem preferencia: o clique basta */
-      }
       btn.click();
       return 'exit-ultra';
     }
   }
   return eco || ultra ? 'still-economy' : 'ok';
+})()`;
+
+/**
+ * A preferencia do usuario, lida da pagina (o jogo guarda em localStorage:
+ * '1' = ligado). E o que o launcher guarda ANTES de tirar o jogo do Modo
+ * Economia — o botao do jogo zera a chave, e sem esta leitura a restauracao
+ * no fim do modo leve nao teria o que restaurar.
+ */
+export const LIGHT_PREFS_READ = `(() => {
+  try {
+    return {
+      economia: window.localStorage.getItem('${LIGHT_ECONOMY_KEY}') === '1',
+      ultra: window.localStorage.getItem('${LIGHT_ULTRA_KEY}') === '1',
+    };
+  } catch {
+    return { economia: false, ultra: false };
+  }
+})()`;
+
+/**
+ * Sai do Modo Economia pelo botao do proprio jogo ("Ligar a cena"), sem
+ * reload e sem escrever a preferencia: o clique do jogo ja avisa o servidor
+ * (cliente.economia{ativo:false}) e o campo volta. Se o botao nao existir,
+ * devolve 'ausente' — quem decide o fallback e o main.
+ */
+export const LIGHT_SAIR_ECONOMIA = `(() => {
+  const btn = document.querySelector('#eco-sair');
+  if (!btn) return 'ausente';
+  btn.click();
+  return 'ok';
+})()`;
+
+/**
+ * Liga o Modo Economia pelo atalho da cena. O pack de automacao usa a CLASSE
+ * (.hunt-eco) e o jogo tambem expoe o ID (#hunt-eco): tenta os dois, porque
+ * perder a preferencia do usuario por causa de um seletor e o pior defeito
+ * possivel aqui.
+ */
+export const LIGHT_LIGAR_ECONOMIA = `(() => {
+  const btn = document.querySelector('#hunt-eco') || document.querySelector('.hunt-eco');
+  if (!btn) return 'ausente';
+  btn.click();
+  return 'ok';
+})()`;
+
+/** Sai do Modo ULTRA pelo botao da propria caixa do ULTRA. */
+export const LIGHT_SAIR_ULTRA = `(() => {
+  const btn = document.querySelector('#ultra-sair');
+  if (!btn) return 'ausente';
+  btn.click();
+  return 'ok';
+})()`;
+
+/**
+ * Liga o Modo ULTRA pelo interruptor do painel de Configuracoes. O handler e
+ * delegado no container do modal, entao o clique sintetico funciona com o
+ * modal fechado.
+ */
+export const LIGHT_LIGAR_ULTRA = `(() => {
+  const btn = document.querySelector('#cfg-ultra');
+  if (!btn) return 'ausente';
+  btn.click();
+  return 'ok';
+})()`;
+
+/** O jogo esta no Modo Economia agora? (a classe do proprio jogo) */
+export const LIGHT_EM_ECONOMIA = `(() => {
+  const root = document.documentElement;
+  const eco = !!root?.classList.contains('modo-economia');
+  const ultra = !!root?.classList.contains('modo-ultra');
+  return eco ? 'economia' : ultra ? 'ultra' : 'nenhum';
 })()`;
 
 export const LIGHT_PREFS_ON = `(() => {
