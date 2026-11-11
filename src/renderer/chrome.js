@@ -19,9 +19,18 @@ const stopAllBtn = document.getElementById('stop-all');
 const closePopupsBtn = document.getElementById('close-popups');
 const diagBtn = document.getElementById('diagnostics');
 const diagStatus = document.getElementById('diag-status');
+const focusBtn = document.getElementById('focus-btn');
+const focusModal = document.getElementById('focus-modal');
+const focusSlotList = document.getElementById('focus-slot-list');
+const focusEnterBtn = document.getElementById('focus-enter');
+const focusCancelBtn = document.getElementById('focus-cancel');
+const focusError = document.getElementById('focus-error');
+const layoutBtns = document.getElementById('layout-btns');
 let editingSlot = null;
 let riskReady = false;
 let lastSlots = [];
+let focusedSlotId = null;
+let selectedFocusSlotId = null;
 
 modalSave.disabled = true;
 window.launcher
@@ -41,8 +50,10 @@ window.launcher
 document.getElementById('modal-cancel').addEventListener('click', closeModal);
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !scriptsModal.hidden) closeScriptsModal();
+  else if (e.key === 'Escape' && !focusModal.hidden) closeFocusChooser();
   else if (e.key === 'Escape' && !modal.hidden) closeModal();
   else if (e.key === 'Escape' && !closePopupsBtn.hidden) window.launcher.closePopups();
+  else if (e.key === 'Escape' && focusedSlotId) exitFocusMode();
 });
 modal.addEventListener('click', (e) => {
   if (e.target === modal) closeModal();
@@ -201,6 +212,133 @@ document.querySelectorAll('#layout-btns button').forEach((btn) => {
   });
 });
 
+function syncFocusButton() {
+  const active = Boolean(focusedSlotId);
+  focusBtn.textContent = active ? 'Sair do foco' : 'Foco';
+  focusBtn.classList.toggle('focus-active', active);
+  focusBtn.setAttribute('aria-pressed', String(active));
+  focusBtn.title = active ? 'Voltar à grade de sessões (Esc)' : 'Escolher uma sessão para ampliar';
+  layoutBtns.hidden = active;
+}
+
+function selectFocusSlot(id) {
+  selectedFocusSlotId = id;
+  for (const option of focusSlotList.querySelectorAll('.focus-option')) {
+    option.setAttribute('aria-checked', String(option.dataset.slotId === id));
+  }
+  focusEnterBtn.disabled = !id;
+}
+
+function renderFocusSlots() {
+  const selectedStillExists = lastSlots.some((slot) => slot.id === selectedFocusSlotId);
+  if (!selectedStillExists) selectedFocusSlotId = lastSlots[0]?.id ?? null;
+  focusSlotList.replaceChildren();
+  for (const slot of lastSlots) {
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.className = 'focus-option';
+    option.dataset.slotId = slot.id;
+    option.setAttribute('role', 'radio');
+    option.setAttribute('aria-checked', String(slot.id === selectedFocusSlotId));
+
+    const dot = document.createElement('i');
+    dot.className = slot.crashedUntil ? 'dot crash' : slot.loggedIn ? 'dot on' : 'dot';
+    option.appendChild(dot);
+
+    const copy = document.createElement('span');
+    copy.className = 'focus-option-copy';
+    const name = document.createElement('span');
+    name.className = 'focus-option-name';
+    name.textContent = slot.name;
+    const status = document.createElement('span');
+    status.className = 'focus-option-status';
+    status.textContent = slot.loggedIn ? 'Conta conectada' : 'Sessão em execução';
+    copy.append(name, status);
+    option.appendChild(copy);
+
+    const radio = document.createElement('span');
+    radio.className = 'focus-option-radio';
+    radio.setAttribute('aria-hidden', 'true');
+    option.appendChild(radio);
+    option.addEventListener('click', () => selectFocusSlot(slot.id));
+    focusSlotList.appendChild(option);
+  }
+  focusEnterBtn.disabled = !selectedFocusSlotId;
+}
+
+function openFocusChooser() {
+  focusError.textContent = '';
+  selectedFocusSlotId = lastSlots[0]?.id ?? null;
+  renderFocusSlots();
+  focusModal.hidden = false;
+  window.launcher.setViewsVisible(false);
+  focusCancelBtn.focus();
+}
+
+function closeFocusChooser(returnFocus = true) {
+  if (focusModal.hidden) return;
+  focusModal.hidden = true;
+  window.launcher.setViewsVisible(true);
+  if (returnFocus) focusBtn.focus();
+}
+
+async function enterFocusMode() {
+  if (!selectedFocusSlotId) return;
+  focusError.textContent = '';
+  focusEnterBtn.disabled = true;
+  const id = selectedFocusSlotId;
+  let result;
+  try {
+    result = await window.launcher.setFocusedSlot(id);
+  } catch {
+    result = null;
+  }
+  if (!result?.ok) {
+    focusError.textContent = result?.error === 'sessao inexistente'
+      ? 'Essa sessão foi fechada. Escolha outra.'
+      : 'Não foi possível ativar o modo foco.';
+    focusEnterBtn.disabled = false;
+    return;
+  }
+  focusedSlotId = id;
+  syncFocusButton();
+  closeFocusChooser(false);
+  window.launcher.focusSlot(id);
+}
+
+async function exitFocusMode() {
+  const result = await window.launcher.setFocusedSlot(null).catch(() => null);
+  if (!result?.ok) return;
+  focusedSlotId = null;
+  syncFocusButton();
+  focusBtn.focus();
+}
+
+focusBtn.addEventListener('click', () => {
+  if (focusedSlotId) exitFocusMode();
+  else openFocusChooser();
+});
+focusCancelBtn.addEventListener('click', () => closeFocusChooser());
+focusEnterBtn.addEventListener('click', enterFocusMode);
+focusModal.addEventListener('click', (event) => {
+  if (event.target === focusModal) closeFocusChooser();
+});
+focusSlotList.addEventListener('keydown', (event) => {
+  const options = [...focusSlotList.querySelectorAll('.focus-option')];
+  if (!options.length || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+  event.preventDefault();
+  const current = options.findIndex((option) => option.dataset.slotId === selectedFocusSlotId);
+  const next = event.key === 'Home'
+    ? 0
+    : event.key === 'End'
+      ? options.length - 1
+      : (Math.max(current, 0) + (event.key === 'ArrowDown' ? 1 : options.length - 1)) % options.length;
+  const id = options[next].dataset.slotId;
+  selectFocusSlot(id);
+  options[next].focus();
+});
+syncFocusButton();
+
 const chipViews = new Map();
 const autoStateLabel = {
   starting: 'iniciando',
@@ -258,7 +396,17 @@ function createChip() {
   x.tabIndex = 0;
   chip.appendChild(x);
   const view = { chip, dot, label, tag, light, auto, p2, slot: null, rename: null, lightError: false, lightNote: '' };
-  chip.addEventListener('click', () => view.slot && window.launcher.focusSlot(view.slot.id));
+  chip.addEventListener('click', () => {
+    if (!view.slot) return;
+    if (focusedSlotId) {
+      const id = view.slot.id;
+      window.launcher.setFocusedSlot(id)
+        .then((result) => { if (result?.ok) window.launcher.focusSlot(id); })
+        .catch(() => {});
+    } else {
+      window.launcher.focusSlot(view.slot.id);
+    }
+  });
   chip.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     if (view.slot) window.launcher.slotMenu(view.slot.id);
@@ -355,6 +503,7 @@ function createChip() {
 
 function updateChip(view, s) {
   view.slot = s;
+  view.chip.classList.toggle('focused', s.focused === true);
   const crashIn = s.crashedUntil ? Math.max(0, Math.ceil((s.crashedUntil - Date.now()) / 1000)) : 0;
   view.dot.className = crashIn > 0 ? 'dot crash' : s.loggedIn ? 'dot on' : 'dot';
   view.dot.title = crashIn > 0
@@ -407,6 +556,9 @@ window.launcher.onRenameRequest(({ id }) => chipViews.get(id)?.rename?.());
 
 window.launcher.onState((slots) => {
   lastSlots = slots;
+  focusedSlotId = slots.find((slot) => slot.focused === true)?.id ?? null;
+  syncFocusButton();
+  if (!focusModal.hidden) renderFocusSlots();
   const ids = new Set(slots.map((s) => s.id));
   for (const [id, view] of chipViews) {
     if (ids.has(id)) continue;

@@ -237,6 +237,8 @@ function sendState() {
   stateTimer.unref?.();
 }
 
+registry.onFocusChange = () => sendState();
+
 function pushState() {
   if (!win || win.isDestroyed()) return;
   win.webContents.send(
@@ -244,6 +246,7 @@ function pushState() {
     registry.slots.map((s) => ({
       id: s.id,
       name: s.name,
+      focused: registry.focusedSlotId === s.id,
       url: s.url,
       loggedIn: s.loggedIn === true,
       lightMode: s.lightMode === true,
@@ -698,6 +701,16 @@ ipcMain.handle('launcher:set-layout', (event, payload) => {
   registry.cols = cols;
   if (win && !win.isDestroyed()) registry.layout(win);
   return true;
+});
+
+ipcMain.handle('launcher:set-focus', (event, payload) => {
+  if (!isChrome(event.sender)) return { ok: false, error: 'origem invalida' };
+  const id = payload?.id;
+  if (id !== null && (typeof id !== 'string' || !registry.get(id))) {
+    return { ok: false, error: 'sessao inexistente' };
+  }
+  if (!registry.setFocusedSlot(id)) return { ok: false, error: 'sessao inexistente' };
+  return { ok: true, focusedSlotId: id };
 });
 
 ipcMain.on('launcher:focus-slot', (event, payload) => {

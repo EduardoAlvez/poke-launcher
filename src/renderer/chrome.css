@@ -61,6 +61,8 @@ button:hover { border-color: var(--accent); }
 #add-form .ok { border-color: var(--accent); }
 #layout-btns { display: flex; gap: 4px; }
 #layout-btns button.active { border-color: var(--accent); color: var(--accent); }
+#focus-btn.focus-active { border-color: #3fbf7f; color: #3fbf7f; }
+.chip.focused { border-color: var(--accent); background: #29291f; }
 .empty-hint { color: var(--muted); padding: 12px; }
 .error { color: #ff6b6b; font-size: 12px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip .auto {
@@ -130,6 +132,29 @@ button.danger:hover { border-color: #ff6b6b; }
 }
 #scripts-modal[hidden] { display: none; }
 .modal-card.wide { width: 700px; max-height: 92vh; overflow: auto; }
+#focus-modal {
+  position: fixed; inset: 0; background: #0b0d11cc;
+  display: flex; align-items: center; justify-content: center; z-index: 11;
+}
+#focus-modal[hidden] { display: none; }
+.focus-card { width: 460px; max-height: 88vh; overflow: auto; }
+#focus-slot-list { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; max-height: 50vh; overflow-y: auto; }
+#focus-slot-list:empty::before { content: 'Nenhuma sessão aberta.'; color: var(--muted); font-size: 12px; }
+.focus-option {
+  width: 100%; display: flex; align-items: center; gap: 10px; text-align: left;
+  padding: 10px 12px; background: #14161b; border: 1px solid #2c3240;
+}
+.focus-option[aria-checked="true"] { border-color: var(--accent); background: #24271e; }
+.focus-option .dot { flex: 0 0 7px; }
+.focus-option-copy { display: flex; flex: 1; flex-direction: column; gap: 3px; min-width: 0; }
+.focus-option-name { color: var(--fg); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.focus-option-status { color: var(--muted); font-size: 11px; }
+.focus-option-radio {
+  width: 16px; height: 16px; flex: 0 0 16px; border: 1px solid var(--muted); border-radius: 50%;
+}
+.focus-option[aria-checked="true"] .focus-option-radio { border: 5px solid var(--accent); }
+#focus-error { width: 100%; max-width: none; white-space: normal; }
+#focus-enter { border-color: var(--accent); color: var(--accent); }
 .hint { color: var(--muted); font-size: 12px; margin: 0 0 10px; }
 .script-warn {
   color: var(--accent); font-size: 12px; margin: 0 0 10px;

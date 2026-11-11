@@ -1,5 +1,5 @@
 import { WebContentsView } from 'electron';
-import { computeGrid, popupBounds, TOOLBAR_H } from './layout.js';
+import { computeGrid, computeFocusBounds, isSlotVisible, popupBounds, TOOLBAR_H } from './layout.js';
 import { installSlotExtensions } from './extensions.js';
 import { installDexHook } from './dex-hook.js';
 import { registerAddonPreload, matchesGame } from './addons.js';
@@ -28,10 +28,13 @@ export class SlotRegistry {
     this.slots = [];
     this.seq = 0;
     this.cols = 2;
+    this.focusedSlotId = null;
+    this.viewsVisible = true;
     this.win = null;
     this.addonPreloadPath = null;
     this.closingPopups = new WeakSet();
     this.onPopupChange = null;
+    this.onFocusChange = null;
     this.onLightChange = null;
     this.onCrash = null;
     this.scriptRunner = null;
@@ -42,6 +45,21 @@ export class SlotRegistry {
 
   attachWindow(win) {
     this.win = win;
+  }
+
+  bindFocusShortcut(slot, view = slot.view) {
+    view.webContents.on('before-input-event', (event, input) => {
+      if (
+        this.focusedSlotId !== slot.id ||
+        !this.viewsVisible ||
+        input.type !== 'keyDown' ||
+        input.key !== 'Escape' ||
+        input.isAutoRepeat
+      ) return;
+      event.preventDefault();
+      this.setFocusedSlot(null);
+      if (this.win && !this.win.isDestroyed()) this.win.webContents.focus();
+    });
   }
 
   /**
@@ -145,6 +163,7 @@ export class SlotRegistry {
       prefsEconomiaDoUsuario: null,
       prefsEconomiaPendente: null,
     };
+    this.bindFocusShortcut(slot, view);
     view.webContents.on('render-process-gone', () => this.recreate(slot));
     // Reload na MESMA url nao recria a view: o arm do hook morre com o
     // documento antigo, entao o consentimento em memoria tem de cair junto.
@@ -247,7 +266,23 @@ export class SlotRegistry {
   }
 
   setViewsVisible(visible) {
+    this.viewsVisible = visible === true;
+    this.syncViewVisibility();
+  }
+
+  setFocusedSlot(id) {
+    if (id !== null && !this.get(id)) return false;
+    const changed = this.focusedSlotId !== id;
+    this.focusedSlotId = id;
+    if (this.win && !this.win.isDestroyed()) this.layout(this.win);
+    else this.syncViewVisibility();
+    if (changed) this.onFocusChange?.(id);
+    return true;
+  }
+
+  syncViewVisibility() {
     for (const slot of this.slots) {
+      const visible = isSlotVisible(slot.id, this.focusedSlotId, this.viewsVisible);
       if (!slot.view.webContents.isDestroyed()) slot.view.setVisible(visible);
       for (const popup of slot.popups) {
         if (!popup.webContents.isDestroyed()) popup.setVisible(visible);
@@ -295,6 +330,7 @@ export class SlotRegistry {
     if (!dead.webContents.isDestroyed()) dead.webContents.close();
     const fresh = makeView(slot.id);
     slot.view = fresh;
+    this.bindFocusShortcut(slot, fresh);
     this.applySlotPrefs(slot);
     slot.lightApplied = false;
     slot.lightCssKey = null;
@@ -330,6 +366,8 @@ export class SlotRegistry {
   remove(id) {
     const i = this.slots.findIndex((s) => s.id === id);
     if (i === -1) return false;
+    const wasFocused = this.focusedSlotId === id;
+    if (wasFocused) this.focusedSlotId = null;
     const [slot] = this.slots.splice(i, 1);
     slot.removed = true;
     for (const popup of [...slot.popups]) this.closePopup(slot, popup);
@@ -338,11 +376,14 @@ export class SlotRegistry {
     }
     if (!slot.view.webContents.isDestroyed()) slot.view.webContents.close();
     if (this.win && !this.win.isDestroyed()) this.layout(this.win);
+    if (wasFocused) this.onFocusChange?.(null);
     return true;
   }
 
   destroyAll() {
     this.disposed = true;
+    this.focusedSlotId = null;
+    this.viewsVisible = true;
     for (const slot of this.slots) {
       slot.removed = true;
       for (const popup of [...slot.popups]) this.closePopup(slot, popup);
@@ -354,22 +395,29 @@ export class SlotRegistry {
   layout(win) {
     if (win.isDestroyed()) return;
     const [cw, ch] = win.getContentSize();
-    const rects = computeGrid(this.slots.length, { width: cw, height: ch }, {
+    const bounds = { width: cw, height: ch };
+    if (this.focusedSlotId && !this.get(this.focusedSlotId)) {
+      this.focusedSlotId = null;
+      this.onFocusChange?.(null);
+    }
+    const focusBounds = this.focusedSlotId ? computeFocusBounds(bounds) : null;
+    const rects = computeGrid(this.slots.length, bounds, {
       cols: this.cols,
       topOffset: TOOLBAR_H,
     });
-    if (rects.length === this.slots.length) {
-      this.slots.forEach((slot, i) => {
-        if (!win.contentView.children.includes(slot.view)) win.contentView.addChildView(slot.view);
-        slot.view.setBounds(rects[i]);
-      });
-    }
-    const pRect = popupBounds({ width: cw, height: ch });
+    const gridIsValid = rects.length === this.slots.length;
+    this.slots.forEach((slot, i) => {
+      if (!win.contentView.children.includes(slot.view)) win.contentView.addChildView(slot.view);
+      const rect = slot.id === this.focusedSlotId ? focusBounds : gridIsValid ? rects[i] : null;
+      if (rect) slot.view.setBounds(rect);
+    });
+    const pRect = popupBounds(bounds);
     for (const slot of this.slots) {
       for (const popup of slot.popups) {
         if (!win.contentView.children.includes(popup)) win.contentView.addChildView(popup);
         popup.setBounds(pRect);
       }
     }
+    this.syncViewVisibility();
   }
 }

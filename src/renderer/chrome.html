@@ -23,6 +23,7 @@
       <button data-cols="2" class="active" title="2 colunas">▯▯</button>
       <button data-cols="3" title="3 colunas">▯▯▯</button>
     </div>
+    <button id="focus-btn" title="Escolher uma sessão para ampliar">Foco</button>
     <button id="stop-all" class="danger" hidden title="Parar todas as automacoes">Parar automações</button>
     <button id="close-popups" class="danger" hidden>Fechar popup de login (Esc)</button>
     <span id="diag-status" class="muted"></span>
@@ -30,6 +31,20 @@
     <button id="scripts-btn" title="UserScripts por sessão">Scripts</button>
     <button id="diagnostics" title="Salva um relatorio dos seletores da pagina (sem dados da conta)">Diagnóstico</button>
   </header>
+
+  <div id="focus-modal" hidden>
+    <div class="modal-card focus-card" role="dialog" aria-modal="true" aria-labelledby="focus-title">
+      <h2 id="focus-title">Escolher tela para o foco</h2>
+      <p class="hint">A sessão escolhida ocupa toda a área de jogo.</p>
+      <div id="focus-slot-list" role="radiogroup" aria-label="Sessões disponíveis"></div>
+      <p class="hint">As outras sessões continuam em execução.</p>
+      <p id="focus-error" class="error" aria-live="polite"></p>
+      <div class="actions">
+        <button id="focus-cancel">Cancelar</button>
+        <button id="focus-enter" class="ok">Entrar no foco</button>
+      </div>
+    </div>
+  </div>
 
   <div id="modal" hidden>
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">

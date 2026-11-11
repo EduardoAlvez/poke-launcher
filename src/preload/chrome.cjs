@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('launcher', {
   removeSlot: (id) => ipcRenderer.invoke('launcher:remove-slot', { id }),
   renameSlot: (id, name) => ipcRenderer.invoke('launcher:rename-slot', { id, name }),
   setLayout: (cols) => ipcRenderer.invoke('launcher:set-layout', { cols }),
+  setFocusedSlot: (id) => ipcRenderer.invoke('launcher:set-focus', { id }),
   setLightMode: (id, on) => ipcRenderer.invoke('launcher:set-light', { id, on: on === true }),
   focusSlot: (id) => ipcRenderer.send('launcher:focus-slot', { id }),
   slotMenu: (id) => ipcRenderer.invoke('launcher:slot-menu', { id }),

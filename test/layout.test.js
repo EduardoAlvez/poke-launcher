@@ -1,11 +1,32 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeGrid, popupBounds, TOOLBAR_H } from '../src/main/layout.js';
+import { computeGrid, computeFocusBounds, isSlotVisible, popupBounds, TOOLBAR_H } from '../src/main/layout.js';
 
 const bounds = { width: 808, height: 608 };
 
 test('zero slots = nenhuma rect', () => {
   assert.deepEqual(computeGrid(0, bounds, { cols: 2 }), []);
+});
+
+test('modo foco usa toda a area abaixo da toolbar', () => {
+  assert.deepEqual(computeFocusBounds(bounds), {
+    x: 0,
+    y: TOOLBAR_H,
+    width: bounds.width,
+    height: bounds.height - TOOLBAR_H,
+  });
+});
+
+test('modo foco retorna vazio quando nao ha area util', () => {
+  assert.equal(computeFocusBounds({ width: 0, height: 608 }), null);
+  assert.equal(computeFocusBounds({ width: 808, height: TOOLBAR_H }), null);
+});
+
+test('visibilidade combina modo foco com ocultacao temporaria', () => {
+  assert.equal(isSlotVisible('a', null, true), true);
+  assert.equal(isSlotVisible('b', 'a', true), false);
+  assert.equal(isSlotVisible('a', 'a', true), true);
+  assert.equal(isSlotVisible('a', 'a', false), false);
 });
 
 test('1 slot ocupa 100% menos margens', () => {

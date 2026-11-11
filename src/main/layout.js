@@ -23,6 +23,17 @@ export function computeGrid(count, contentBounds, { cols, gap = 8, topOffset = T
   return rects;
 }
 
+export function computeFocusBounds(contentBounds, { topOffset = TOOLBAR_H } = {}) {
+  const width = Math.floor(contentBounds?.width ?? 0);
+  const height = Math.floor((contentBounds?.height ?? 0) - topOffset);
+  if (width <= 0 || height <= 0) return null;
+  return { x: 0, y: topOffset, width, height };
+}
+
+export function isSlotVisible(slotId, focusedSlotId, viewsVisible = true) {
+  return viewsVisible === true && (focusedSlotId == null || slotId === focusedSlotId);
+}
+
 export function popupBounds(contentBounds, { gap = 8, topOffset = TOOLBAR_H, maxWidth = 720, maxHeight = 820 } = {}) {
   const availWidth = Math.max(0, contentBounds.width - gap * 2);
   const availHeight = Math.max(0, contentBounds.height - topOffset - gap * 2);
