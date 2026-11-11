@@ -158,15 +158,29 @@
         </div>
         <p id="hunt-progress" class="info"></p>
         <p id="route-status" class="info" hidden></p>
+        <p id="p2-status" class="info" hidden></p>
       </div>
+
+      <h3>Arremessar no Economia (P2)</h3>
+      <p id="p2-risk" class="risk"></p>
+      <label class="check">
+        <input type="checkbox" id="p2-ack" />
+        <span>Entendo o risco e autorizo o P2 nesta execução</span>
+      </label>
+      <label>Máx. arremessos
+        <input type="number" id="p2-max" min="1" max="500" step="1" value="30" />
+      </label>
+      <p id="p2-msg" class="msg" hidden></p>
 
       <p id="hunt-error" class="error" hidden></p>
       <p id="route-msg" class="msg" hidden></p>
 
       <div class="actions">
+        <button id="p2-stop" class="danger" hidden>Desarmar P2</button>
         <button id="route-stop" class="danger" hidden>Parar rota</button>
         <button id="hunt-refresh">Atualizar</button>
         <button id="hunt-close">Fechar</button>
+        <button id="p2-start" class="ok" disabled>Arremessar no Economia</button>
         <button id="route-start" class="ok" disabled>Capturar um por um</button>
       </div>
     </div>

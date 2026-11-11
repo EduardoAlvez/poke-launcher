@@ -63,6 +63,18 @@ test('recusa payload que nao e welcome', () => {
   assert.equal(loadWelcome(state, { t: 'estado' }).ok, false);
 });
 
+test('delta do wire vem aninhado em estado: a captura chega e o roteiro enxerga', () => {
+  const state = createHuntState();
+  loadWelcome(state, welcomeReal);
+  // Forma REAL da linha do socket: { t: 'estado', estado: { parcial } }
+  // (poke-app.js: aplicarEstado(mesclarEstado(m.estado))).
+  const frame = { t: 'estado', estado: { level: 121, huntSlug: 'weedle', dexMud: { 2053: { k: 9, c: 1 } } } };
+  applyDelta(state, frame);
+  assert.equal(state.dex['2053'].c, 1, 'sem o aninhamento a dex congela e a rota nunca avanca');
+  assert.equal(state.level, 121);
+  assert.equal(state.huntSlug, 'weedle');
+});
+
 test('delta dexMud marca captura e muda o painel; dexFora remove', () => {
   const state = createHuntState();
   loadWelcome(state, welcomeReal);
@@ -84,6 +96,13 @@ test('delta troca area e bolas', () => {
   assert.equal(state.huntSlug, 'weedle');
   assert.deepEqual(state.balls, { 4: 10 });
   assert.equal(currentHunt(state).nome, 'Weedle');
+});
+
+test('delta de bolas substitui o espelho (o inventario do servidor e a verdade)', () => {
+  const state = createHuntState();
+  loadWelcome(state, welcomeReal);
+  applyDelta(state, { balls: { 4: 2 } });
+  assert.deepEqual(state.balls, { 4: 2 });
 });
 
 test('pokedex hostil: chaves ruins descartados, limites aplicados com aviso', () => {

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Poke Launcher Dex Hook",
   "version": "1.0",
-  "description": "So observa o WebSocket do jogo para o painel de caca. Passivo ate o usuario ligar.",
+  "description": "Observa o WebSocket do jogo para o painel de caca e, so com o P2 armado, envia arremessos. Passivo ate o usuario ligar.",
   "content_scripts": [
     {
       "matches": ["https://pokeidle.io/*", "https://*.pokeidle.io/*"],

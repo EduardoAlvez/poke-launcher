@@ -17,7 +17,7 @@ window.addEventListener('message', (ev) => {
   const d = ev && ev.data;
   if (!d || d.source !== DEX_CHANNEL) return;
   const t = typeof d.t === 'string' ? d.t : '';
-  if (t !== 'welcome' && t !== 'estado' && t !== 'ready') return;
+  if (t !== 'welcome' && t !== 'estado' && t !== 'ready' && t !== 'captura') return;
   ipcRenderer.send('hunt:state', { t, data: d.data ?? null });
 });
 
@@ -26,6 +26,27 @@ ipcRenderer.on('dex:get', () => {
     window.postMessage({ source: DEX_CHANNEL, t: 'get' }, window.location.origin);
   } catch (err) {
     console.error('[dex] pedido de snapshot falhou:', err && err.message);
+  }
+});
+
+// ---- Ponte do P2 (Fase 12) ----
+// Canal proprio: o hook roda no mundo MAIN e o main (processo) nao consegue
+// falar com ele. Os relatorios NAO passam pelo `hunt:state` (que e gated pelo
+// painel de caca e tem rate-limit) porque o arm precisa reconciliar mesmo com
+// a dex desligada.
+const P2_CHANNEL = 'pokeLauncherP2';
+
+window.addEventListener('message', (ev) => {
+  const d = ev && ev.data;
+  if (!d || d.source !== P2_CHANNEL || d.t !== 'p2state') return;
+  ipcRenderer.send('p2:report', d.data ?? null);
+});
+
+ipcRenderer.on('p2:cmd', (_event, cmd) => {
+  try {
+    window.postMessage({ source: P2_CHANNEL, t: 'p2cmd', data: cmd ?? {} }, window.location.origin);
+  } catch (err) {
+    console.error('[p2] comando falhou:', err && err.message);
   }
 });
 

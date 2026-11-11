@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LightMode } from '../src/main/light-mode.js';
+import { LightMode, modoLeveAtivo, saidaPermitida } from '../src/main/light-mode.js';
 
 const URL_JOGO = 'https://pokeidle.io/app';
 
@@ -432,4 +432,86 @@ test('a fila serializa as tarefas da sessao', async () => {
   await Promise.all([primeira, segunda]);
   assert.deepEqual(ordem, ['primeira inicio', 'primeira fim', 'segunda']);
   assert.equal(state.reloads, 0);
+});
+
+// ---- Fase 12: a invariante do P2 em cima do modo leve ----
+
+test('modoLeveAtivo/saidaPermitida: P2 armado conta como posse e proibe a saida', () => {
+  assert.equal(modoLeveAtivo(null), false);
+  assert.equal(modoLeveAtivo({}), false);
+  assert.equal(modoLeveAtivo({ lightMode: true }), true);
+  assert.equal(modoLeveAtivo({ p2Armado: true }), true);
+  assert.equal(saidaPermitida({ lightMode: true }), true);
+  assert.equal(saidaPermitida({ p2Armado: true }), false);
+});
+
+test('com o P2 armado o modo leve (P1) nao liga: os dois se excluem', async () => {
+  const { wc, state } = fakeWebContents();
+  const slot = fakeSlot(wc, { p2Armado: true });
+  const light = new LightMode();
+  state.classes.add('modo-economia');
+
+  const res = await light.enable(slot);
+  assert.deepEqual(res, { ok: false, motivo: 'p2-armado' });
+  assert.equal(slot.lightMode, false);
+  assert.deepEqual(state.cliques, [], 'nem toca no jogo');
+  assert.equal(state.css.size, 0);
+});
+
+test('com o P2 armado a vigia NAO clica a saida do Economia', async () => {
+  const { wc, state } = fakeWebContents();
+  const slot = fakeSlot(wc, { p2Armado: true });
+  const light = new LightMode();
+  state.classes.add('modo-economia');
+  const res = await light.watch(slot);
+  assert.equal(res, 'economia', 'so relata o estado, sem efeito');
+  assert.deepEqual(state.cliques, [], 'o jogo fica no Economia por invariante');
+});
+
+test('com o P2 armado o sync nao clica e nao aplica o CSS do P1', async () => {
+  const { wc, state } = fakeWebContents();
+  const slot = fakeSlot(wc, { p2Armado: true });
+  const light = new LightMode();
+  state.classes.add('modo-economia');
+  await light.sync(slot);
+  assert.deepEqual(state.cliques, []);
+  assert.equal(state.reloads, 0);
+  // O P2 nao precisa do CSS/rAF (o jogo ja esta no Economia). Aplicar aqui
+  // deixaria o CSS orfao depois do desarme.
+  assert.equal(slot.lightApplied, false, 'o CSS do P1 nao pode ficar orfao');
+  assert.equal(state.css.size, 0);
+});
+
+test('armar o P2 entre o portao e a fila do enable nao sai do Economia', async () => {
+  const { wc, state } = fakeWebContents();
+  const slot = fakeSlot(wc);
+  const light = new LightMode();
+  state.classes.add('modo-economia');
+  // O portao de fora ve `p2Armado:false`; o arm acontece antes da tarefa rodar.
+  const promessa = light.enable(slot);
+  slot.p2Armado = true;
+  const res = await promessa;
+  assert.deepEqual(res, { ok: false, motivo: 'p2-armado' });
+  assert.deepEqual(state.cliques, [], 'nenhum clique pode tirar o jogo do Economia');
+  assert.equal(slot.lightMode, false);
+});
+
+test('com o P2 armado desligar o P1 nao restaura a preferencia', async () => {
+  const { wc, state } = fakeWebContents();
+  const slot = fakeSlot(wc, { lightMode: true, p2Armado: true });
+  slot.prefsEconomiaDoUsuario = { economia: true, ultra: false };
+  const light = new LightMode();
+  const res = await light.disable(slot);
+  assert.equal(res.restauracao, 'nada-a-restaurar');
+  assert.deepEqual(state.cliques, [], 'nenhum caminho pode tirar o jogo do Economia');
+});
+
+test('a pendencia de restauracao espera o P2 desarmar', async () => {
+  const { wc, state } = fakeWebContents();
+  const slot = fakeSlot(wc, { lightMode: true, p2Armado: true });
+  slot.prefsEconomiaPendente = { economia: true, ultra: false };
+  const light = new LightMode();
+  state.classes.add('modo-economia');
+  assert.equal(await light.restaurarPreferenciaAposPararDoAUTO(slot), 'adiado');
+  assert.deepEqual(state.cliques, []);
 });

@@ -15,6 +15,24 @@ import {
 } from './light.js';
 
 /**
+ * O launcher e o dono da preferencia de Economia/Ultra quando ALGUM modo leve
+ * esta ativo: o P1 (sai do jogo para o campo chegar) ou o P2 (mantem o jogo
+ * no Economia e arremessa pelo socket). Um unico predicado — os oito portoes
+ * do arquivo e do main leem este, nunca `lightMode` direto.
+ */
+export function modoLeveAtivo(slot) {
+  return slot?.lightMode === true || slot?.p2Armado === true;
+}
+
+/**
+ * Com o P2 armado o jogo tem de FICAR no Economia: nenhum caminho pode
+ * clicar a saida. A unica excecao e o rollback do portao (main).
+ */
+export function saidaPermitida(slot) {
+  return slot?.p2Armado !== true;
+}
+
+/**
  * O modo leve de uma sessao, sem dependencia do Electron: assim a logica de
  * fila, geracao e recarga pode ser testada com um webContents falso.
  */
@@ -30,7 +48,7 @@ export class LightMode {
   }
 
   stale(slot, wc, gen) {
-    return gen !== (slot.lightGen ?? 0) || slot.view.webContents !== wc || !slot.lightMode;
+    return gen !== (slot.lightGen ?? 0) || slot.view.webContents !== wc || !modoLeveAtivo(slot);
   }
 
   /**
@@ -126,7 +144,14 @@ export class LightMode {
    * ligou: devolve o que aconteceu.
    */
   async enable(slot) {
+    if (slot.p2Armado === true) {
+      return { ok: false, motivo: 'p2-armado' };
+    }
     return this.queue(slot, async () => {
+      // Re-checa DENTRO da fila: entre o portao acima e a vez desta tarefa o
+      // P2 pode ter sido armado. Sair do Economia aqui seria a corrida que o
+      // consentimento do P2 existe para impedir.
+      if (slot.p2Armado === true) return { ok: false, motivo: 'p2-armado' };
       const gen = this.begin(slot);
       slot.lightMode = true;
       slot.lightReloadAt = 0;
@@ -225,7 +250,11 @@ export class LightMode {
         );
         return { ok: false, restauracao: 'adiado' };
       }
-      const restauracao = await this.restaurarPreferenciaDoUsuario(slot, { adiar: campoEmUso });
+      // Com o P2 armado o jogo DEVE continuar no Economia: restaurar a
+      // preferencia aqui tiraria o campo (e o P2 ficaria sem alvo).
+      const restauracao = slot.p2Armado
+        ? 'nada-a-restaurar'
+        : await this.restaurarPreferenciaDoUsuario(slot, { adiar: campoEmUso });
       slot.lightRestauracao = restauracao;
       this.onChange?.(slot);
       return { ok: true, restauracao };
@@ -295,7 +324,7 @@ export class LightMode {
     // Com o modo leve LIGADO, o jogo esta fora do Economia de proposito:
     // religar agora brigaria com a vigia (que sairia de novo em 20 s) e o
     // botao do jogo zeraria a preferencia de novo. A pendencia espera.
-    if (slot.lightMode === true) return 'adiado';
+    if (modoLeveAtivo(slot)) return 'adiado';
     return this.queue(slot, async () => {
       if (!slot.prefsEconomiaPendente) return 'nada-a-restaurar';
       slot.prefsEconomiaDoUsuario = LightMode.juntaPreferencias(
@@ -313,14 +342,17 @@ export class LightMode {
    * de 10 s para o caso de o jogo reescrever a preferencia em loop).
    */
   async sync(slot) {
-    if (!slot.lightMode) return;
+    if (!modoLeveAtivo(slot)) return;
     return this.queue(slot, async () => {
       const gen = slot.lightGen ?? 0;
       const wc = slot.view.webContents;
       if (wc.isDestroyed() || !/^https?:/i.test(wc.getURL())) return;
       const estado = await wc.executeJavaScript(LIGHT_EM_ECONOMIA, true).catch(() => 'erro');
       if (this.stale(slot, wc, gen)) return;
-      if (estado === 'economia' || estado === 'ultra') {
+      // Com o P2 armado o jogo PRECISA ficar no Economia: sair daqui quebraria
+      // a invariante (e o botao do jogo zeraria a preferencia). So reaplica o
+      // CSS/rAF por documento.
+      if (saidaPermitida(slot) && (estado === 'economia' || estado === 'ultra')) {
         // primeira vez que esta sessao e tocada com o modo leve ligado (o
         // launcher pode ter reiniciado): guarda a preferencia do usuario antes
         // de o jogo zera a chave. Uma preferencia ja lembrada NUNCA volta de
@@ -353,7 +385,9 @@ export class LightMode {
   async applyNow(slot) {
     const gen = slot.lightGen ?? 0;
     const wc = slot.view.webContents;
-    if (wc.isDestroyed() || !slot.lightMode) return false;
+    // O CSS/rAF e do P1 (o P2 nao esconde a cena: o jogo ja esta no Economia).
+    // Amarrar em `lightMode` garante que desarmar o P2 nao deixe o CSS orfao.
+    if (wc.isDestroyed() || slot.lightMode !== true) return false;
     const oldKey = slot.lightCssKey;
     slot.lightCssKey = null;
     if (oldKey) {
@@ -383,7 +417,15 @@ export class LightMode {
         res = await wc.executeJavaScript(LIGHT_APPLY, true);
         ok = await wc.executeJavaScript(LIGHT_VERIFY, true).catch(() => false);
       }
-      if (this.stale(slot, wc, gen)) return false;
+      if (this.stale(slot, wc, gen)) {
+        // A troca de documento invalidou a aplicacao: nao deixa o CSS desta
+        // geracao pendurado (o proximo documento ainda nao tem nada).
+        if (slot.lightCssKey) {
+          await wc.removeInsertedCSS(slot.lightCssKey).catch(() => {});
+          slot.lightCssKey = null;
+        }
+        return false;
+      }
       slot.lightApplied = ok === true;
       slot.lightFailed = !slot.lightApplied;
       if (!slot.lightApplied) {
@@ -412,22 +454,26 @@ export class LightMode {
    * quebra; um reload sim, e o sync cobre isso).
    */
   async watch(slot) {
-    if (!slot.lightMode) return 'off';
+    if (!modoLeveAtivo(slot)) return 'off';
     const wc = slot.view.webContents;
     if (wc.isDestroyed() || !/^https?:/i.test(wc.getURL())) return 'off';
     // pela fila: a reaplicacao do CSS/rAF nao pode correr ao lado de um
     // toggle (duas aplicacoes brigariam pela chave do CSS injetado).
     return this.queue(slot, async () => {
-      if (!slot.lightMode) return 'off';
+      if (!modoLeveAtivo(slot)) return 'off';
       const gen = slot.lightGen ?? 0;
-      const res = await wc.executeJavaScript(LIGHT_WATCH, true).catch(() => 'error');
+      // Com o P2 armado a vigia NAO clica: o jogo fica no Economia por
+      // invariante. LIGHT_EM_ECONOMIA e a mesma leitura de estado do
+      // LIGHT_WATCH, sem o clique — o clique vive DENTRO da expressao.
+      const expr = saidaPermitida(slot) ? LIGHT_WATCH : LIGHT_EM_ECONOMIA;
+      const res = await wc.executeJavaScript(expr, true).catch(() => 'error');
       if (res === 'exit-economy' || res === 'exit-ultra') {
         const nome = res === 'exit-economy' ? 'Modo Economia' : 'Modo ULTRA Economia';
         console.info(`[${slot.id}] modo leve: saiu do ${nome} para o campo continuar chegando`);
       }
-      if (res !== 'error' && !this.stale(slot, wc, gen)) {
+      if (res !== 'error' && slot.lightMode === true && !this.stale(slot, wc, gen)) {
         const ok = await wc.executeJavaScript(LIGHT_VERIFY, true).catch(() => false);
-        if (ok !== true && !this.stale(slot, wc, gen)) {
+        if (ok !== true && slot.lightMode === true && !this.stale(slot, wc, gen)) {
           await this.applyNow(slot);
         }
       }

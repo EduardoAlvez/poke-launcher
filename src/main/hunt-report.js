@@ -136,14 +136,26 @@ function parseBalls(raw) {
   return out;
 }
 
-// Deltas `estado`: dexMud traz {chave: entrada}; dexFora traz [chaves] removidas.
-export function applyDelta(state, delta) {
-  if (!delta || typeof delta !== 'object') return state;
+/**
+ * Deltas `estado`: o wire manda o parcial DENTRO de `estado` — o cliente do
+ * jogo faz `aplicarEstado(mesclarEstado(m.estado))` (poke-app.js) —, igual ao
+ * `welcome`. Ler o topo deixava `dexMud` invisivel: a dex (e o balls/level/area)
+ * congelava depois do welcome e a rota nunca confirmava uma captura.
+ * O parcial solto continua aceito (testes e documentos antigos).
+ */
+export function applyDelta(state, raw) {
+  if (!raw || typeof raw !== 'object') return state;
+  const delta = raw.estado && typeof raw.estado === 'object' && !Array.isArray(raw.estado)
+    ? raw.estado
+    : raw;
   if (delta.level !== undefined && Number.isFinite(Number(delta.level)) && Number(delta.level) > 0) {
     state.level = Math.floor(Number(delta.level));
   }
   if (delta.huntSlug !== undefined) state.huntSlug = sanitizeText(delta.huntSlug, 60) || null;
   if (delta.outlandTier !== undefined) state.outlandTier = toNonNeg(Number(delta.outlandTier));
+  // O delta traz o INVENTARIO (o espelho do welcome e a mesma coisa): substitui
+  // em vez de mesclar, para o espelho nao guardar contagem velha de uma bola
+  // que o jogador ja nao tem. (O jogo hoje nem reenvia `balls` nos deltas.)
   if (delta.balls && typeof delta.balls === 'object') state.balls = parseBalls(delta.balls);
   if (delta.dexMud && typeof delta.dexMud === 'object') {
     for (const [key, entry] of Object.entries(delta.dexMud)) {

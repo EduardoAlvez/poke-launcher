@@ -81,6 +81,13 @@ button:hover { border-color: var(--accent); }
 .chip .light:hover { color: var(--accent); border-color: var(--accent); }
 .chip .light.on { color: #7cc7ff; border-color: #7cc7ff; }
 .chip .light.error { color: #ff6b6b; border-color: #ff6b6b; }
+.chip .p2 {
+  font-size: 10px; letter-spacing: .4px; color: var(--muted);
+  border: 1px solid #2c3240; border-radius: 4px; padding: 0 4px; cursor: pointer;
+}
+.chip .p2:hover { color: var(--accent); border-color: var(--accent); }
+.chip .p2.on { color: #3fbf7f; border-color: #3fbf7f; }
+.chip .p2.error { color: #ff6b6b; border-color: #ff6b6b; }
 .chip .tag {
   font-size: 10px; letter-spacing: .4px; color: #ffb454;
   border: 1px solid #4a3a20; border-radius: 4px; padding: 0 4px;

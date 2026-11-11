@@ -8,9 +8,11 @@ import { injectScripts, newScriptId, withTimeout, INJECT_TIMEOUT_MS } from './sc
 import { Notifier, parseGameEvent } from './notifications.js';
 import { createTray } from './tray.js';
 import { loadPack, buildAddonPreload, applyPackCss, sendPackRules, loadAutomationPack, auditPack, collectSelectors, matchesGame } from './addons.js';
-import { LIGHT_SAMPLE_SCENE } from './light.js';
+import { LIGHT_EM_ECONOMIA, LIGHT_SAMPLE_SCENE } from './light.js';
 import { AutomationController, RISK_TEXT } from './automation.js';
 import { RouteController, ROUTE_RISK_TEXT } from './route.js';
+import { P2Controller, P2_RISK_TEXT } from './p2.js';
+import { modoLeveAtivo } from './light-mode.js';
 import { warmExtensionCache } from './extensions.js';
 import { buildDexHook, installDexHook, dexFlagExpr } from './dex-hook.js';
 import { createHuntState, loadWelcome, applyDelta, huntView, catalogMissing } from './hunt-report.js';
@@ -110,12 +112,59 @@ const route = new RouteController({
 });
 
 /**
+ * Fase 12 (P2): arremesso pelo socket com o jogo DENTRO do Economia. O motor
+ * vive aqui; o hook (mundo da pagina) so observa e atua.
+ *
+ * INVARIANTE: armado, o jogo nao sai do Economia por iniciativa do launcher.
+ * A unica saida e o desarme (quando o motor aborta) — e o desarme NAO mexe no
+ * DOM do jogo: o hook desfaz a mentira do `cliente.economia` e o controle
+ * volta para o jogo como estava.
+ */
+// Numero do pedido de arm por slot: cada desarme (botao, "Parar tudo",
+// bandeja, desligar a dex, reload) incrementa o numero e cancela os pedidos
+// que ainda esperam a fila do modo leve: um arm nao pode vencer um
+// consentimento ja revogado.
+const p2Pedidos = new Map();
+const p2 = new P2Controller({
+  send: (slot, cmd) => {
+    const wc = slot?.view?.webContents;
+    if (!wc || wc.isDestroyed()) return;
+    wc.send('p2:cmd', cmd);
+  },
+  notify: () => sendState(),
+  onRollback: (slot, motivo) => {
+    rollbackDoP2(slot, motivo).catch((err) =>
+      console.error(`[${slot.id}] p2: rollback falhou:`, err?.message ?? err)
+    );
+  },
+});
+
+/**
+ * Saida do P2 depois de um aborto. O P2 NAO mexe no DOM nem nas preferencias do
+ * jogo: ele so mente com o servidor (o `cliente.economia` reescrito) para o
+ * campo continuar chegando. Desarmar ja desfaz a mentira (o hook reenvia o
+ * estado real), entao aqui nao ha o que clicar — e clicar seria o pior:
+ * tiraria o jogo do Economia e zeraria a preferencia do usuario sem ele pedir.
+ *
+ * Consequencia intencional: o rollback NAO liga o modo leve (isso persistia
+ * `lightMode` em disco, bloqueava o re-arm do P2 e deixava o AUTO sem campo).
+ * A preferencia do usuario continua sendo dele.
+ */
+async function rollbackDoP2(slot, motivo) {
+  console.warn(`[${slot.id}] p2: rollback (${motivo}) — o controle volta ao jogo`);
+  sendState();
+}
+
+/**
  * O launcher e o dono da preferencia de Economia/Ultra so quando o modo leve
  * esta LIGADO E APLICADO. Um modo leve quebrado (o rAF nao pode ser limitado)
- * nao segura a preferencia — e o AUTO volta a cuidar dela como antes.
+ * nao segura a preferencia — e o AUTO volta a cuidar dela como antes. O P2
+ * tambem segura: o Economia e o que mantem o campo chegando.
  */
 function gerenciaEconomiaDoSlot(slot) {
-  return slot?.lightMode === true && slot?.lightApplied === true;
+  // O P2 nao aplica o CSS do P1 (o jogo ja esta no Economia), entao nao ha
+  // `lightApplied` — mas a posse da preferencia e dele enquanto armado.
+  return modoLeveAtivo(slot) && (slot?.p2Armado === true || slot?.lightApplied === true);
 }
 
 /**
@@ -128,6 +177,9 @@ async function restaurarPreferenciaSeParou(slotId) {
   const slot = registry.get(slotId);
   if (!slot) return;
   if (slot.automation?.enabled === true || route.isActiveRunning(slotId)) return;
+  // Com o modo leve/P2 no comando, religar a preferencia aqui brigaria com a
+  // vigia (que sai do Economia em seguida) e zeraria a chave outra vez.
+  if (modoLeveAtivo(slot)) return;
   await registry.restaurarPreferenciaDoUsuario(slot).catch((err) => {
     console.error(`[${slotId}] modo leve: restaurar preferencia falhou:`, err.message);
   });
@@ -215,6 +267,7 @@ function pushState() {
       autoLastTick: s.automationStatus?.lastTickAt ?? null,
       autoCaidos: s.automationStatus?.caidos ?? null,
       route: route.publicState(s.id),
+      p2: p2.publicState(s),
       popups: s.popups.length,
       crashedUntil: s.crashUntil && s.crashUntil > Date.now() ? s.crashUntil : 0,
     }))
@@ -355,6 +408,13 @@ function wireAddonPack() {
       injected.delete(contents.id);
       cssKeys.delete(contents.id);
       audited.delete(contents.id);
+      // Documento novo = hook novo, sem arm. O motor precisa morrer junto: um
+      // run orfao continuaria arremessando por cima de um campo que nao ve.
+      const slot = registry.findByWebContentsId(contents.id);
+      if (slot && slot.view.webContents === contents && p2.run(slot)) {
+        p2Pedidos.set(slot.id, (p2Pedidos.get(slot.id) ?? 0) + 1);
+        p2.desarmar(slot, 'recarregou');
+      }
     });
     contents.on('dom-ready', apply);
     contents.on('did-finish-load', apply);
@@ -411,7 +471,7 @@ async function restoreSlots() {
   for (const slot of registry.slots) {
     if (!slot.prefsEconomiaPendente) continue;
     setTimeout(() => {
-      if (slot.lightMode === true) return; // com o modo leve ligado, a vigia briga com o restauro
+      if (modoLeveAtivo(slot)) return; // com o modo leve ligado, a vigia briga com o restauro
       restaurarPreferenciaSeParou(slot.id).catch((err) => {
         console.error(`[restore] slot ${slot.id}: preferencia pendente:`, err.message);
       });
@@ -698,6 +758,12 @@ ipcMain.on('hunt:state', (event, msg) => {
   if (!huntAllowed(slot.id, Date.now())) return;
   if (msg?.t === 'welcome') loadWelcome(st, msg.data);
   else if (msg?.t === 'estado') applyDelta(st, msg.data);
+  else if (msg?.t === 'captura') {
+    // Evento real de captura (com a especie): a fila "um por um" confirma
+    // por aqui e nao espera o delta da dex.
+    route.onCapture(slot.id, msg.data);
+    return;
+  }
   route.onHuntUpdate(slot.id, st);
 });
 
@@ -737,7 +803,7 @@ ipcMain.handle('launcher:hunt', async (event, payload) => {
     }
   }
   if (!enabled || !st.ready) {
-    return { ok: true, enabled, ready: false, view: null, missing: null };
+    return { ok: true, enabled, ready: false, view: null, missing: null, p2: p2.publicState(slot) };
   }
   // `ate meu nv`: a UI pede levelCap=true e o teto vira o nivel do treinador.
   const levelCap = payload?.levelCap === true ? st.level ?? null : null;
@@ -748,6 +814,7 @@ ipcMain.handle('launcher:hunt', async (event, payload) => {
     trainerLevel: st.level,
     view: huntView(st),
     missing: catalogMissing(st, { limit: 300, levelCap }),
+    p2: p2.publicState(slot),
   };
 });
 
@@ -775,7 +842,13 @@ ipcMain.handle('launcher:dex-set', async (event, payload) => {
   // O estado do main passa a ser a autoridade do opt-in: ao desligar, o gate do
   // 'hunt:state' ignoras os deltas que o hook ainda mandar deste documento —
   // desligar desliga de verdade, sem esperar recarga.
-  if (!on) route.stop(slot.id, 'dex-desligada').catch(() => {});
+  if (!on) {
+    route.stop(slot.id, 'dex-desligada').catch(() => {});
+    // Sem a leitura da dex o orcamento de bolas (o `welcome`) morre junto:
+    // manter o P2 armado sem fonte de estoque e arremessar no escuro.
+    p2Pedidos.set(slot.id, (p2Pedidos.get(slot.id) ?? 0) + 1);
+    p2.desarmar(slot, 'dex-desligada');
+  }
   slot.dexWatch = on;
   await persist().catch((err) => console.error('[dex] nao consegui gravar o opt-in:', err.message));
   const st = createHuntState();
@@ -797,6 +870,9 @@ ipcMain.handle('launcher:route-set', async (event, payload) => {
   const slot = registry.get(payload?.id);
   if (!slot) return { ok: false, error: 'sessao inexistente' };
   if (payload?.on === true) {
+    if (slot.p2Armado === true) {
+      return { ok: false, error: 'o P2 esta armado: a rota precisa do campo e do lancamento do AUTO' };
+    }
     const maxAlvos = Number(payload?.maxAlvos);
     return route.start(slot.id, {
       ackRisk: payload?.ackRisk === true,
@@ -869,6 +945,10 @@ ipcMain.handle('launcher:set-light', async (event, payload) => {
   const slot = registry.get(payload?.id);
   if (!slot) return { ok: false, error: 'sessao inexistente' };
   const on = payload?.on === true;
+  // O P2 exige o Economia; o P1 sai dele. Os dois nao podem coexistir.
+  if (on && slot.p2Armado === true) {
+    return { ok: false, error: 'o P2 esta armado: desarme antes de ligar o modo leve' };
+  }
   // Com AUTO ou rota rodando, o campo ainda e preciso: a preferencia do usuario
   // (Economia/Ultra) fica PENDENTE de restaurar, nao e esquecida.
   const campoEmUso = slot.automation?.enabled === true || route.isActiveRunning(slot.id);
@@ -891,8 +971,114 @@ ipcMain.handle('launcher:set-light', async (event, payload) => {
   };
 });
 
+ipcMain.handle('launcher:p2-set', async (event, payload) => {
+  if (!isChrome(event.sender)) return { ok: false, error: 'origem invalida' };
+  const slot = registry.get(payload?.id);
+  if (!slot) return { ok: false, error: 'sessao inexistente' };
+  if (payload?.on !== true) {
+    // Revoga o pedido: um arm que ainda espera a fila nao pode acontecer.
+    p2Pedidos.set(slot.id, (p2Pedidos.get(slot.id) ?? 0) + 1);
+    const res = p2.desarmar(slot, 'pedido');
+    sendState();
+    return res;
+  }
+  if (payload?.ackRisk !== true) return { ok: false, error: 'risco nao aceito' };
+  if (slot.dexWatch !== true) {
+    return { ok: false, error: 'ligue a leitura da dex: e dela que vem o estoque de bolas do login' };
+  }
+  if (slot.automation?.enabled === true) return { ok: false, error: 'pare a automacao antes de armar o P2' };
+  if (route.isActiveRunning(slot.id)) return { ok: false, error: 'pare a rota antes de armar o P2' };
+  const maxBolas = Number(payload?.maxBolas);
+  // Numero do pedido: se um desarme chegar enquanto esta tarefa espera a
+  // fila, o pedido antigo nao pode armar por cima do consentimento revogado.
+  const pedido = (p2Pedidos.get(slot.id) ?? 0) + 1;
+  p2Pedidos.set(slot.id, pedido);
+  // Passa pela fila do modo leve: armar no meio de um toggle/sync daria dois
+  // donos ao estado do jogo no mesmo instante (a corrida do M1).
+  const res = await registry.lightMode.queue(slot, async () => {
+    // Re-checa DENTRO da fila (mesmo padrao do `enable` do P1): entre o
+    // portao acima e a vez desta tarefa o consentimento pode ter sido
+    // revogado (desarme, "Parar tudo", desligar a dex, reload).
+    if (p2Pedidos.get(slot.id) !== pedido) return { ok: false, error: 'o pedido de armar foi cancelado' };
+    if (slot.p2Armado === true) return { ok: false, error: 'o P2 ja esta armado' };
+    if (slot.dexWatch !== true) return { ok: false, error: 'a leitura da dex foi desligada' };
+    if (slot.automation?.enabled === true) return { ok: false, error: 'a automacao foi ligada' };
+    if (route.isActiveRunning(slot.id)) return { ok: false, error: 'a rota foi ligada' };
+    if (slot.lightMode === true) {
+      return { ok: false, error: 'o modo leve (P1) esta ligado: desligue antes de armar o P2' };
+    }
+    // O P2 e o "arremessar com o jogo NO Modo Economia": fora dele (ou no
+    // ULTRA) o cliente desenha a cena e o ganho do modoEconomia nao existe.
+    const wc = slot.view?.webContents;
+    if (!wc || wc.isDestroyed()) return { ok: false, error: 'a sessao nao esta viva' };
+    const estado = await wc.executeJavaScript(LIGHT_EM_ECONOMIA, true).catch(() => 'erro');
+    if (estado !== 'economia') {
+      return { ok: false, error: 'o jogo precisa estar no Modo Economia (e nao no ULTRA) para armar o P2' };
+    }
+    return p2.armar(slot, {
+      consent: true,
+      bolas: huntStates.get(slot.id)?.balls ?? {},
+      maxBolas: Number.isFinite(maxBolas) && maxBolas > 0 ? Math.floor(maxBolas) : null,
+    });
+  });
+  sendState();
+  return res;
+});
+
+ipcMain.handle('p2:risk-text', (event) => {
+  if (!isChrome(event.sender)) return '';
+  return P2_RISK_TEXT;
+});
+
+// Relatorio do hook (mundo da pagina). Como todo evento que sobe da pagina,
+// e dado NAO-confiavel: o controller so le campos que ele mesmo normaliza.
+const P2_REPORTES_POR_SEGUNDO = 40;
+// Mensagens de CONTROLE (confirmacao do arremesso, erro, desarme, ready) tem
+// cota propria e mais alta: um `campo` em rajada nao pode derrubar o `bola`
+// que fecha o pendente (senao o motor aborta sem necessidade).
+const P2_CONTROLES_POR_SEGUNDO = 120;
+const p2Reportes = new Map();
+function p2ReportePermitido(slotId, kind) {
+  const agora = Date.now();
+  const controle = kind === 'bola' || kind === 'erro' || kind === 'desarmado'
+    || kind === 'ready' || kind === 'armado' || kind === 'capturado';
+  const teto = controle ? P2_CONTROLES_POR_SEGUNDO : P2_REPORTES_POR_SEGUNDO;
+  const atual = p2Reportes.get(slotId);
+  if (!atual || agora - atual.janela >= 1000) {
+    p2Reportes.set(slotId, { janela: agora, n: 1, controle: controle ? 1 : 0 });
+    return true;
+  }
+  if (controle) {
+    atual.controle += 1;
+    return atual.controle <= teto;
+  }
+  atual.n += 1;
+  return atual.n <= teto;
+}
+
+ipcMain.on('p2:report', (event, data) => {
+  if (!data || typeof data !== 'object') return;
+  const slot = registry.findByWebContentsId(event.sender.id);
+  if (!slot || slot.view.webContents !== event.sender) return;
+  // A pagina so manda relatorio quando esta no jogo; um provedor OAuth no
+  // mesmo webContents nao fala P2.
+  if (!matchesGame(event.sender.getURL())) return;
+  // O preload do addon roda no frame principal: nada de iframe da pagina
+  // comandando o motor.
+  if (event.senderFrame && event.senderFrame !== event.sender.mainFrame) return;
+  if (!p2ReportePermitido(slot.id, data.kind)) return;
+  p2.onReport(slot, data);
+});
+
 ipcMain.handle('automation:set', async (event, payload) => {
   if (!isChrome(event.sender)) return { ok: false, error: 'origem invalida' };
+  const slot = registry.get(payload?.id);
+  if (!slot) return { ok: false, error: 'sessao inexistente' };
+  // O AUTO sai do Economia para clicar nos mobs; o P2 precisa que o jogo FIQUE
+  // nele. Ligar o AUTO com o P2 armado quebraria a invariante.
+  if (payload?.config?.enabled === true && slot.p2Armado === true) {
+    return { ok: false, error: 'o P2 esta armado: desarme antes de ligar a automacao' };
+  }
   const res = await automation.setConfig(payload?.id, payload?.config);
   // o AUTO pode ter parado aqui: a preferencia de Economia/Ultra volta se o
   // campo deixar de ser preciso.
@@ -903,6 +1089,10 @@ ipcMain.handle('automation:set', async (event, payload) => {
 
 ipcMain.handle('automation:stop-all', async (event) => {
   if (!isChrome(event.sender)) return false;
+  for (const slot of registry.slots) {
+    p2Pedidos.set(slot.id, (p2Pedidos.get(slot.id) ?? 0) + 1);
+    p2.desarmar(slot, 'parar-tudo');
+  }
   await automation.stopAll();
   await route.stopAll();
   for (const slot of registry.slots) await restaurarPreferenciaSeParou(slot.id);
@@ -983,7 +1173,7 @@ app.whenReady().then(async () => {
 
   const lightWatch = setInterval(() => {
     for (const slot of registry.slots) {
-      if (!slot.lightMode) continue;
+      if (!modoLeveAtivo(slot)) continue;
       registry.watchLight(slot).catch(() => {});
     }
   }, 20_000);
@@ -999,6 +1189,10 @@ app.whenReady().then(async () => {
       isMuted: notifier.muted,
       onStopAutomation: () => {
         // promessa flutuante vira unhandledRejection se a persistencia falhar
+        for (const s of registry.slots) {
+          p2Pedidos.set(s.id, (p2Pedidos.get(s.id) ?? 0) + 1);
+          p2.desarmar(s, 'bandeja');
+        }
         Promise.all([automation.stopAll(), route.stopAll()])
           .then(() => Promise.all(registry.slots.map((s) => restaurarPreferenciaSeParou(s.id))))
           .catch((err) => console.error('[bandeja] parar automacoes:', err?.message ?? err))

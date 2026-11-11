@@ -344,3 +344,14 @@ test('buildSnapshot preserva eco e a lista de scripts', async () => {
   assert.equal(snap.slots[0].eco, true);
   assert.deepEqual(snap.scripts, [validScript]);
 });
+
+test('o arm do P2 nunca vai para o disco (consentimento e por execucao)', async () => {
+  const { buildSnapshot, parseSlot } = await import('../src/main/store.js');
+  const previous = { schemaVersion: 1, maxSlots: 2, slots: [], scripts: [] };
+  const live = [{ id: 'slot-1', name: 'A', url: 'https://pokeidle.io/app', p2Armado: true }];
+  const snap = buildSnapshot(previous, live);
+  assert.equal('p2Armado' in snap.slots[0], false);
+  // E um slots.json adulterado a mao nao consegue armar no boot.
+  const parsed = parseSlot({ id: 'slot-1', name: 'A', url: 'https://pokeidle.io/app', p2Armado: true });
+  assert.equal('p2Armado' in parsed, false);
+});

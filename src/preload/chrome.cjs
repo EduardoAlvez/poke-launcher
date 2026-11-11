@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld('launcher', {
   dexSet: (id, on) => ipcRenderer.invoke('launcher:dex-set', { id, on: on === true }),
   routeSet: (opts) => ipcRenderer.invoke('launcher:route-set', opts),
   routeRisk: () => ipcRenderer.invoke('route:risk-text'),
+  p2Set: (opts) => ipcRenderer.invoke('launcher:p2-set', opts),
+  p2Risk: () => ipcRenderer.invoke('p2:risk-text'),
   onState: (cb) => ipcRenderer.on('launcher:state', (_e, slots) => cb(slots)),
   onRenameRequest: (cb) => ipcRenderer.on('launcher:rename-request', (_e, payload) => cb(payload ?? {})),
 });

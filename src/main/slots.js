@@ -132,6 +132,9 @@ export class SlotRegistry {
       lightMode: false,
       eco: false,
       dexWatch: false,
+      // P2: consentimento de escrita POR EXECUCAO — em memoria, nunca no
+      // slots.json (store.js nao o lista, entao o snapshot o descarta).
+      p2Armado: false,
       lightApplied: false,
       lightFailed: false,
       lightCssKey: null,
@@ -143,6 +146,11 @@ export class SlotRegistry {
       prefsEconomiaPendente: null,
     };
     view.webContents.on('render-process-gone', () => this.recreate(slot));
+    // Reload na MESMA url nao recria a view: o arm do hook morre com o
+    // documento antigo, entao o consentimento em memoria tem de cair junto.
+    view.webContents.on('did-start-loading', () => {
+      slot.p2Armado = false;
+    });
     view.webContents.on('did-finish-load', () =>
       this.afterLoad(slot).catch((err) => console.error(`[${slot.id}] afterLoad:`, err?.message ?? err))
     );
@@ -292,6 +300,8 @@ export class SlotRegistry {
     slot.lightCssKey = null;
     slot.lightGen += 1;
     slot.lightReloadAt = 0;
+    // O documento novo nao tem arm: o hook morreu junto com ele.
+    slot.p2Armado = false;
     fresh.webContents.on('render-process-gone', () => this.recreate(slot));
     fresh.webContents.on('did-finish-load', () => {
       this.applySlotPrefs(slot);

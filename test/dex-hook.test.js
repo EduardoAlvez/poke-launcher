@@ -13,10 +13,14 @@ const welcomeFixture = JSON.parse(
   await fs.readFile(path.join(here, 'fixtures', 'pokeidle-welcome.sample.json'), 'utf8')
 );
 
-function makeWindow({ flag = '1' } = {}) {
+function makeWindow({ flag = '1', economia = false } = {}) {
   const win = {};
   const posted = [];
   const sockets = [];
+  const classes = new Set(economia ? ['modo-economia'] : []);
+  win.document = {
+    documentElement: { classList: { contains: (c) => classes.has(c) } },
+  };
   win.localStorage = {
     getItem: (k) => (k === 'pokeLauncherDex' && flag === '1' ? '1' : null),
     setItem() {},
@@ -33,6 +37,7 @@ function makeWindow({ flag = '1' } = {}) {
       this.url = url;
       this.protocols = protocols;
       this.listeners = {};
+      this.readyState = 1;
     }
     addEventListener(type, cb) {
       (this.listeners[type] = this.listeners[type] || []).push(cb);
@@ -41,8 +46,9 @@ function makeWindow({ flag = '1' } = {}) {
     emitMessage(data) {
       for (const cb of this.listeners.message || []) cb({ data });
     }
-    send() {
-      throw new Error('hook NAO pode escrever no socket');
+    send(data) {
+      this.sent = this.sent || [];
+      this.sent.push(data);
     }
   }
   FakeWS.CONNECTING = 0;
@@ -137,11 +143,13 @@ test('welcome malicioso nao polui o prototype nem via ponte', () => {
   assert.equal({}.polluted, undefined);
 });
 
-test('so leitura: nada trafega para fora e payload nao-JSON ou gigante e ignorado', () => {
+test('passivo: sem arm, o send do jogo passa intacto e nada e injetado', () => {
   const env = makeWindow({ flag: '1' });
   installHook(env);
   const socket = new env.win.WebSocket('wss://pokeidle.io/socket');
   const postedBefore = env.posted.length;
+  socket.send(JSON.stringify({ t: 'cliente.economia', ativo: true }));
+  assert.deepEqual(socket.sent, [JSON.stringify({ t: 'cliente.economia', ativo: true })]);
   socket.emitMessage('nao-json');
   socket.emitMessage('{"t":"chat","m":"oi"}');
   socket.emitMessage('x'.repeat(4_000_001));
@@ -178,4 +186,155 @@ test('evento de outra origem (frame estranho) nao dispara replay', () => {
   const before = env.posted.filter((p) => p.msg.t === 'welcome').length;
   env.fire({ source: {}, data: { source: 'pokeLauncherDex', t: 'get' } });
   assert.equal(env.posted.filter((p) => p.msg.t === 'welcome').length, before, 'fonte errada ignorada');
+});
+
+// ---- Fase 12: o atuador do P2 no hook ----
+
+const P2 = 'pokeLauncherP2';
+
+function armar(env) {
+  env.fire({
+    source: env.win,
+    data: { source: P2, t: 'p2cmd', data: { action: 'arm' } },
+  });
+}
+
+function p2posts(env) {
+  return env.posted.filter((p) => p.msg.source === P2 && p.msg.t === 'p2state').map((p) => p.msg.data);
+}
+
+test('p2: armar reabre o campo uma vez e avisa o main', () => {
+  const env = makeWindow({ flag: '1' });
+  installHook(env);
+  const socket = new env.win.WebSocket('wss://pokeidle.io/socket');
+  armar(env);
+  assert.deepEqual(
+    socket.sent.map((s) => JSON.parse(s)),
+    [{ t: 'cliente.economia', ativo: false }],
+    'o servidor precisa voltar a mandar o campo'
+  );
+  const estados = p2posts(env);
+  assert.ok(estados.some((e) => e.kind === 'armado'), 'o main precisa saber que o arm chegou');
+  // O hook anuncia o documento novo no canal do P2 (reconcilia arm fantasma).
+  assert.equal(estados[0].kind, 'ready');
+});
+
+test('p2: armado, o cliente.economia do jogo vira ativo:false (fica no Economia)', () => {
+  const env = makeWindow({ flag: '1' });
+  installHook(env);
+  const socket = new env.win.WebSocket('wss://pokeidle.io/socket');
+  armar(env);
+  socket.send(JSON.stringify({ t: 'cliente.economia', ativo: true }));
+  const ultimo = JSON.parse(socket.sent.at(-1));
+  assert.deepEqual(ultimo, { t: 'cliente.economia', ativo: false });
+  // outras mensagens do jogo passam intactas
+  const chat = JSON.stringify({ t: 'chat', m: 'oi' });
+  socket.send(chat);
+  assert.equal(socket.sent.at(-1), chat);
+  // e desarmado volta a passar como veio
+  env.fire({ source: env.win, data: { source: P2, t: 'p2cmd', data: { action: 'disarm' } } });
+  socket.send(JSON.stringify({ t: 'cliente.economia', ativo: true }));
+  assert.deepEqual(JSON.parse(socket.sent.at(-1)), { t: 'cliente.economia', ativo: true });
+});
+
+test('p2: arremesso so sai com o arm; comando sem arm vira erro', () => {
+  const env = makeWindow({ flag: '1' });
+  installHook(env);
+  const socket = new env.win.WebSocket('wss://pokeidle.io/socket');
+  env.fire({ source: env.win, data: { source: P2, t: 'p2cmd', data: { action: 'throw', slot: 7, ballId: 1 } } });
+  assert.equal(socket.sent, undefined, 'sem arm, nada e enviado');
+  assert.equal(p2posts(env).at(-1).kind, 'erro');
+
+  armar(env);
+  socket.sent = [];
+  env.fire({ source: env.win, data: { source: P2, t: 'p2cmd', data: { action: 'throw', slot: 7, ballId: 4 } } });
+  assert.deepEqual(JSON.parse(socket.sent.at(-1)), { t: 'ball.throw', ballId: 4, slot: 7 });
+  // comando invalido nao vai para o socket
+  socket.sent = [];
+  env.fire({ source: env.win, data: { source: P2, t: 'p2cmd', data: { action: 'throw', slot: 'x' } } });
+  assert.equal(socket.sent.length, 0);
+});
+
+test('p2: campo vira corpos com expiracao no relogio do SERVIDOR', () => {
+  const env = makeWindow({ flag: '1' });
+  installHook(env);
+  const socket = new env.win.WebSocket('wss://pokeidle.io/socket');
+  armar(env);
+  const ts = Date.now();
+  socket.emitMessage(
+    JSON.stringify({
+      t: 'campo',
+      ts,
+      mobs: [
+        { s: 7, n: 'Mew', nv: 5, sh: false, x: true, xr: 4000 },
+        { s: 8, n: 'Mewtwo', nv: 70, x: false },
+      ],
+      fora: [],
+    })
+  );
+  const corpo = p2posts(env).at(-1);
+  assert.equal(corpo.kind, 'corpos');
+  const vivo = corpo.mobs.find((m) => m.s === 8);
+  const morto = corpo.mobs.find((m) => m.s === 7);
+  assert.equal(vivo.x, false);
+  assert.equal(morto.x, true);
+  // `xr` e relativo ao `ts` do servidor: o hook manda a VIDA RESTANTE para o
+  // main nao ter que comparar relogios.
+  assert.ok(Math.abs(morto.resta - 4000) < 5000, `resta ${morto.resta} vs 4000`);
+  assert.equal(vivo.resta, null, 'sem xr nao ha prazo');
+  // `fora` remove o mob do mapa (o proximo frame nao o traz de volta)
+  socket.emitMessage(JSON.stringify({ t: 'campo', ts, mobs: [], fora: [7, 8] }));
+  assert.deepEqual(p2posts(env).at(-1).mobs, []);
+});
+
+test('p2: desarmar desfaz a mentira do cliente.economia (se a pagina esta no Economia)', () => {
+  const env = makeWindow({ flag: '1', economia: true });
+  installHook(env);
+  const socket = new env.win.WebSocket('wss://pokeidle.io/socket');
+  armar(env);
+  // O jogo avisa que esta no Economia; o hook mente para o campo continuar.
+  socket.send(JSON.stringify({ t: 'cliente.economia', ativo: true }));
+  assert.deepEqual(JSON.parse(socket.sent.at(-1)), { t: 'cliente.economia', ativo: false });
+  env.fire({ source: env.win, data: { source: P2, t: 'p2cmd', data: { action: 'disarm' } } });
+  // A verdade volta: o servidor para de mandar o campo de novo.
+  assert.deepEqual(JSON.parse(socket.sent.at(-1)), { t: 'cliente.economia', ativo: true });
+});
+
+test('p2: desarmar fora do Economia nao inventa estado (nao mente ao servidor)', () => {
+  const env = makeWindow({ flag: '1', economia: false });
+  installHook(env);
+  const socket = new env.win.WebSocket('wss://pokeidle.io/socket');
+  armar(env);
+  socket.send(JSON.stringify({ t: 'cliente.economia', ativo: true }));
+  const antes = socket.sent.length;
+  env.fire({ source: env.win, data: { source: P2, t: 'p2cmd', data: { action: 'disarm' } } });
+  assert.equal(socket.sent.length, antes, 'so se desfaz a mentira que o hook contou');
+});
+
+test('p2: batalha confirma o arremesso e a captura', () => {
+  const env = makeWindow({ flag: '1' });
+  installHook(env);
+  const socket = new env.win.WebSocket('wss://pokeidle.io/socket');
+  armar(env);
+  socket.emitMessage(
+    JSON.stringify({
+      t: 'batalha',
+      ev: [
+        { k: 'bola', slot: 7, sucesso: false, ballId: 1 },
+        { k: 'capturado', slot: 7, pokemon: { speciesId: 150, nome: 'Mew', level: 5, shiny: true } },
+        { k: 'ruido', slot: 7 },
+      ],
+    })
+  );
+  const kinds = p2posts(env).filter((p) => p.kind === 'bola' || p.kind === 'capturado');
+  assert.deepEqual(kinds[0], { kind: 'bola', slot: 7, sucesso: false, ballId: 1 });
+  assert.deepEqual(kinds[1], {
+    kind: 'capturado',
+    slot: 7,
+    pokemon: { speciesId: 150, nome: 'Mew', level: 5, shiny: true },
+  });
+  // A captura tambem avisa o canal da dex (a fila "um por um" confirma por ai).
+  const capturas = env.posted.filter((p) => p.msg.source === 'pokeLauncherDex' && p.msg.t === 'captura');
+  assert.equal(capturas.length, 1);
+  assert.deepEqual(capturas[0].msg.data, { speciesId: 150, nome: 'Mew', level: 5, shiny: true });
 });

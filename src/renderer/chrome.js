@@ -246,6 +246,10 @@ function createChip() {
   auto.type = 'button';
   auto.textContent = 'AUTO';
   chip.appendChild(auto);
+  const p2 = document.createElement('button');
+  p2.type = 'button';
+  p2.textContent = 'P2';
+  chip.appendChild(p2);
   const x = document.createElement('span');
   x.className = 'x';
   x.textContent = '×';
@@ -253,7 +257,7 @@ function createChip() {
   x.setAttribute('role', 'button');
   x.tabIndex = 0;
   chip.appendChild(x);
-  const view = { chip, dot, label, tag, light, auto, slot: null, rename: null, lightError: false, lightNote: '' };
+  const view = { chip, dot, label, tag, light, auto, p2, slot: null, rename: null, lightError: false, lightNote: '' };
   chip.addEventListener('click', () => view.slot && window.launcher.focusSlot(view.slot.id));
   chip.addEventListener('contextmenu', (e) => {
     e.preventDefault();
@@ -326,6 +330,8 @@ function createChip() {
       view.lightError = !(res?.ok && res?.aplicado !== false);
       if (res?.motivo === 'fallback-reload') {
         view.lightNote = 'O jogo nao tinha o botao de sair do Economia: a sessao recarregou (ultimo recurso).';
+      } else if (res?.motivo === 'p2-armado') {
+        view.lightNote = 'Desarme o P2 antes de ligar o modo leve: o jogo precisa ficar no Economia.';
       } else {
         view.lightNote = '';
       }
@@ -338,6 +344,11 @@ function createChip() {
   auto.addEventListener('click', (e) => {
     e.stopPropagation();
     if (view.slot) openModal(view.slot);
+  });
+  p2.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!view.slot) return;
+    openHunt(view.slot.id);
   });
   return view;
 }
@@ -363,19 +374,25 @@ function updateChip(view, s) {
   // resolvida depois (quando o AUTO/rota param), e a UI nao pode continuar
   // dizendo "vai voltar" quando ja voltou.
   const restauracao = s.lightRestauracao ?? null;
-  const nota = restauracao === 'adiado'
+  const nota = view.lightNote || (restauracao === 'adiado'
     ? 'A preferencia de Economia/Ultra do usuario volta quando a automacao ou a rota pararem.'
     : restauracao === 'falhou'
       ? 'Nao consegui religar a preferencia de Economia/Ultra do usuario.'
-      : '';
-  view.light.title = failed
-    ? 'Modo leve nao aplicado nesta sessao (o jogo recusou a preferencia ou o rAF nao pode ser limitado). Clique para tentar de novo.'
-    : nota
-      ? nota
+      : '');
+  // A nota explica o PORQUE (ex.: P2 armado) — vale mais que o texto generico.
+  view.light.title = nota
+    ? nota
+    : failed
+      ? 'Modo leve nao aplicado nesta sessao (o jogo recusou a preferencia ou o rAF nao pode ser limitado). Clique para tentar de novo.'
       : light
         ? 'Modo leve ligado: cena oculta e CPU poupado; os lancamentos seguem. Se o jogo estava em Economia/Ultra, o launcher saiu pelo botao do jogo e devolve a sua preferencia no fim.'
         : 'Modo leve desligado: clique para ocultar a cena e poupar CPU sem parar os lancamentos';
   const enabled = s.automation?.enabled === true;
+  const p2st = s.p2 ?? {};
+  view.p2.className = `p2${p2st.armado ? ' on' : ''}`;
+  view.p2.title = p2st.armado
+    ? `P2 armado: ${p2st.gastas ?? 0}/${p2st.limite ?? '?'} arremessos · ${p2st.capturas ?? 0} capturas (o jogo fica no Economia)`
+    : 'P2 desarmado: clique para abrir o painel de caça e armar o arremesso no Economia';
   view.auto.className = `auto${enabled ? ' on' : ''}`;
   view.auto.dataset.state = s.autoState ?? 'idle';
   const age = enabled && s.autoLastTick ? Date.now() - s.autoLastTick : null;
@@ -688,9 +705,17 @@ const routeStatus = document.getElementById('route-status');
 const routeMsg = document.getElementById('route-msg');
 const routeStart = document.getElementById('route-start');
 const routeStop = document.getElementById('route-stop');
+const p2Risk = document.getElementById('p2-risk');
+const p2Ack = document.getElementById('p2-ack');
+const p2Max = document.getElementById('p2-max');
+const p2Status = document.getElementById('p2-status');
+const p2Msg = document.getElementById('p2-msg');
+const p2Start = document.getElementById('p2-start');
+const p2Stop = document.getElementById('p2-stop');
 let huntTimer = null;
 let huntBusy = false;
 let cachedRouteRisk = '';
+let cachedP2Risk = '';
 let routeWasRunning = false;
 let lastBalls = null;
 
@@ -776,8 +801,34 @@ function huntRow(text, meta, cls) {
   return li;
 }
 
+let p2EstavaArmado = false;
+function renderP2Status(st) {
+  const armado = st?.armado === true;
+  // Desarmou por qualquer caminho (chip, "Parar tudo", bandeja, rollback): o
+  // aceite do risco era daquela execucao e nao vale para a proxima.
+  if (p2EstavaArmado && !armado) {
+    p2Ack.checked = false;
+    p2Start.disabled = true;
+  }
+  p2EstavaArmado = armado;
+  p2Start.hidden = armado;
+  p2Stop.hidden = !armado;
+  p2Ack.disabled = armado;
+  p2Start.disabled = armado || !p2Ack.checked;
+  if (!armado) {
+    p2Status.hidden = true;
+    p2Status.textContent = '';
+    return;
+  }
+  const partes = [`P2 armado: ${st.gastas ?? 0}/${st.limite ?? '?'} arremessos`, `${st.capturas ?? 0} capturas`];
+  if (st.pendente) partes.push('aguardando confirmação do servidor');
+  p2Status.hidden = false;
+  p2Status.textContent = partes.join(' · ');
+}
+
 function renderHunt(res) {
   const slot = lastSlots.find((s) => s.id === huntSlotSel.value);
+  renderP2Status(res?.p2 ?? null);
   huntInfo.textContent = slot ? `${slot.name} · ${slot.url}` : '';
   if (!res || !res.ok) {
     huntStatus.hidden = true;
@@ -856,11 +907,13 @@ async function loadHunt() {
   }
 }
 
-function openHunt() {
+function openHunt(preferId) {
   huntModal.hidden = false;
   window.launcher.setViewsVisible(false);
   loadRouteRisk();
+  loadP2Risk();
   fillHuntSlots();
+  if (preferId) huntSlotSel.value = preferId;
   loadHunt();
   huntTimer = setInterval(loadHunt, 2500);
   huntSlotSel.focus();
@@ -879,7 +932,13 @@ function closeHunt() {
 huntBtn.addEventListener('click', openHunt);
 huntClose.addEventListener('click', closeHunt);
 huntRefresh.addEventListener('click', loadHunt);
-huntSlotSel.addEventListener('change', loadHunt);
+huntSlotSel.addEventListener('change', () => {
+  // O aceite do risco e POR SESSAO: marcar na conta A e trocar para a conta B
+  // nao pode levar o consentimento junto.
+  p2Ack.checked = false;
+  p2Start.disabled = true;
+  loadHunt();
+});
 huntLevelcap.addEventListener('change', loadHunt);
 huntModal.addEventListener('click', (e) => {
   if (e.target === huntModal) closeHunt();
@@ -962,6 +1021,74 @@ async function loadRouteRisk() {
     routeRisk.textContent = 'Automatizar viola os Termos de Uso; o risco da rota é da sua conta.';
   }
 }
+
+async function loadP2Risk() {
+  if (cachedP2Risk) {
+    p2Risk.textContent = cachedP2Risk;
+    return;
+  }
+  try {
+    cachedP2Risk = (await window.launcher.p2Risk()) || '';
+    p2Risk.textContent = cachedP2Risk;
+  } catch {
+    p2Risk.textContent = 'O P2 escreve no socket do jogo; automatizar viola os Termos de Uso.';
+  }
+}
+
+function showP2Msg(msg, isError) {
+  p2Msg.hidden = !msg;
+  p2Msg.textContent = msg || '';
+  p2Msg.className = isError ? 'msg error' : 'msg';
+}
+
+p2Ack.addEventListener('change', () => {
+  p2Start.disabled = !p2Ack.checked || p2Stop.hidden === false;
+  if (p2Ack.checked) showP2Msg('', false);
+});
+
+p2Start.addEventListener('click', async () => {
+  const id = huntSlotSel.value;
+  if (!id) return;
+  p2Start.disabled = true;
+  try {
+    const maxBolas = Number(p2Max?.value);
+    const res = await window.launcher.p2Set({
+      id,
+      on: true,
+      ackRisk: p2Ack.checked,
+      maxBolas: Number.isFinite(maxBolas) && maxBolas > 0 ? Math.floor(maxBolas) : 30,
+    });
+    if (!res?.ok) {
+      showP2Msg(res?.error || 'Não foi possível armar o P2.', true);
+      p2Start.disabled = !p2Ack.checked;
+    } else {
+      showP2Msg('', false);
+    }
+    loadHunt();
+  } catch (err) {
+    showP2Msg(err?.message || 'Falha ao armar o P2.', true);
+    p2Start.disabled = !p2Ack.checked;
+  }
+});
+
+p2Stop.addEventListener('click', async () => {
+  const id = huntSlotSel.value;
+  if (!id) return;
+  p2Stop.disabled = true;
+  try {
+    await window.launcher.p2Set({ id, on: false });
+    // Consentimento e POR EXECUCAO: desarmou, o aviso de risco volta a valer
+    // (armar de novo exige marcar a caixa e ler o texto).
+    p2Ack.checked = false;
+    p2Start.disabled = true;
+    showP2Msg('', false);
+  } catch {
+    /* o proximo poll mostra o estado real */
+  } finally {
+    p2Stop.disabled = false;
+    loadHunt();
+  }
+});
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !huntModal.hidden) closeHunt();
 });

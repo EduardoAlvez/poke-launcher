@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RouteController, ROUTE_RISK_TEXT } from '../src/main/route.js';
-import { createHuntState, loadWelcome } from '../src/main/hunt-report.js';
+import { createHuntState, loadWelcome, applyDelta } from '../src/main/hunt-report.js';
 import '../src/shared/engine.js';
 import '../src/shared/automation.js';
 import '../src/shared/route.js';
@@ -89,6 +89,38 @@ test('confirmacao so vem do delta real da dex; captura avanca e re-baselineia', 
   assert.equal(controller.publicState('slot-1').captured, 1);
   sent.length = 0;
   controller.onHuntUpdate('slot-1', st); // c igual ao baseline: nao avanca de novo
+  assert.equal(sent.length, 0);
+});
+
+test('a captura confirmada no frame real (estado aninhado) avanca a fila', async () => {
+  const st = estadoPronto();
+  const { controller, sent } = controllerFake(st);
+  await controller.start('slot-1', { ackRisk: true, maxAlvos: 2, levelCap: true });
+  const pokeId = controller.publicState('slot-1'); // so para garantir a fila montada
+  assert.ok(pokeId);
+  sent.length = 0;
+  // Frame como o servidor manda: o parcial fica DENTRO de `estado`.
+  applyDelta(st, { t: 'estado', estado: { dexMud: { 10: { k: 1, c: 1 } } } });
+  controller.onHuntUpdate('slot-1', st);
+  assert.deepEqual(sent[0], ['slot-1', 'route:cmd', { action: 'advance' }]);
+});
+
+test('evento de captura confirma na hora e nao duplica quando a dex tambem chega', async () => {
+  const st = estadoPronto();
+  const { controller, sent } = controllerFake(st);
+  await controller.start('slot-1', { ackRisk: true, maxAlvos: 2, levelCap: true });
+  sent.length = 0;
+  // Evento real do servidor: { k:'capturado', pokemon:{ speciesId } }.
+  controller.onCapture('slot-1', { speciesId: 10, nome: 'Caterpie' });
+  assert.deepEqual(sent[0], ['slot-1', 'route:cmd', { action: 'advance' }]);
+  assert.equal(controller.publicState('slot-1').captured, 1);
+  // O delta da dex da MESMA captura nao pode pular outro alvo.
+  sent.length = 0;
+  applyDelta(st, { t: 'estado', estado: { dexMud: { 10: { k: 1, c: 1 } } } });
+  controller.onHuntUpdate('slot-1', st);
+  assert.equal(sent.length, 0, 'a mesma captura nao avanca duas vezes');
+  // Captura de outra especie nao mexe na fila.
+  controller.onCapture('slot-1', { speciesId: 999 });
   assert.equal(sent.length, 0);
 });
 

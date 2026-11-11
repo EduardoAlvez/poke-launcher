@@ -36,9 +36,11 @@ Baixe o instalador na página de releases:
 - **Modo leve por sessão** (`LEVE` no chip) — cena oculta e rAF limitado, **sem recarregar** e sem
   parar a caça nem os lançamentos; a sua preferência de Economia/Ultra é guardada e devolvida no fim.
   Pensado para notebook fraco.
-- **Painel de caça por sessão** (`Caça` na toolbar, opt-in e só leitura) — mostra a área atual,
+- **Painel de caça por sessão** (`Caça` na toolbar, opt-in) — mostra a área atual,
   o que a dex já tem e quais espécies faltam; e a **rota "capturar um por um"** (automação opt-in
   que viaja e captura os faltantes em fila). Veja os avisos abaixo.
+- **P2: arremessar dentro do Modo Economia** (opt-in, desligado por padrão) — escreve no socket do
+  jogo; exige consentimento na hora. Veja os avisos abaixo.
 
 ## Automação: leia antes de usar
 
@@ -94,7 +96,7 @@ guarda e devolve): sem isso os dois brigariam e o campo pararia de chegar.
 O custo esperado fica próximo do Modo Economia do jogo, mas com o `campo` ainda chegando — é isso
 que permite lançar bola numa máquina fraca.
 
-## Painel de caça (opcional, só leitura)
+## Painel de caça (opcional)
 
 O botão **Caça** abre um painel por sessão que mostra a área de caça atual, quantas espécies a conta
 já capturou e **quais ainda faltam** no catálogo do jogo. É **opt-in**: nada acontece até você marcar
@@ -102,7 +104,8 @@ já capturou e **quais ainda faltam** no catálogo do jogo. É **opt-in**: nada 
 
 - A leitura é feita por uma **extensão local mínima** (sem permissões, sem rede) que observa o
   WebSocket **de recebimento** do próprio jogo e repassa o estado que o jogo já manda para aquela aba.
-  O launcher **nunca envia nada** nesse socket nem altera o tráfego — é só leitura do que já chega.
+  Por padrão o launcher **apenas lê** nesse socket e **não altera o tráfego**. A única exceção é o
+  **P2** (seção abaixo), que **escreve** no socket — e só quando você arma na hora.
 - A Pokédex **não é salva em disco**: o launcher só espelha, em memória, o que o servidor mandou. Fechar
   a sessão limpa tudo. Desligar o toggle apaga o espelho imediatamente.
 - O opt-in mora no `localStorage` daquela partição (sessão). "Reler login" (que limpa a partição) desliga
@@ -127,6 +130,27 @@ até capturar — então passa ao próximo alvo da fila (ordem por nível/XP/reg
   a confirmação de captura vem do delta real da dex (a leitura do painel precisa estar ligada).
 - Botão **Parar rota** no painel, **Parar automações** na toolbar/bandeja também derruba a rota, e o
   kill switch vale igual.
+
+### P2 — arremessar dentro do Modo Economia (opt-in, desligado por padrão)
+
+O **P2** é a única parte do launcher que **escreve no WebSocket do jogo**: ele manda
+`ball.throw` pelo socket, com o jogo **permanecendo no Modo Economia**.
+
+- É **opt-in e desligado por padrão**: para usar, você precisa da leitura da dex ligada na sessão,
+  o jogo **no Modo Economia** (e não no ULTRA), abrir o painel **Caça**, marcar a caixa de risco do P2
+  e **armar na hora**. Nada é armado sozinho; o consentimento é **por execução** (cada novo uso exige
+  marcar a caixa de novo) e **não é salvo em disco**.
+- **Por que é mais arriscado que a rota**: a rota só simula cliques no DOM; o P2 escreve mensagens que
+  o servidor não esperava de um cliente declarado fora do Economia. Automatizar viola os Termos de Uso
+  do PokeIdle e pode resultar em **ban permanente** da conta. O risco é seu.
+- **Gasta bolas de verdade**: o teto de arremessos é **você que define** (padrão 30 por execução) e
+  nunca passa do estoque que você tinha no login. Cada arremesso leva alguns segundos (2,5–5 s com
+  intervalo aleatório).
+- Enquanto o P2 está armado, o launcher **não tira o jogo do Modo Economia** (a rota e a automação de
+  lançamentos ficam desligadas) e o botão de ligar o modo leve é recusado. Ao desarmar — ou a cada
+  recarga da aba — o controle volta ao jogo.
+- Se o servidor não confirmar o arremesso em 6 s, o P2 **desarma sozinho** e devolve o controle ao
+  jogo. Ele nunca desliga a sua preferência de Economia/Ultra: o P2 não toca no menu do jogo.
 
 ## Requisitos
 
@@ -157,7 +181,7 @@ src/main       processo principal (janela, grade, store, tray, addons, automacao
 src/preload    bridges sandboxed (CJS): chrome.cjs (UI) e addon.cjs (pagina do jogo)
 src/renderer   toolbar/grade (HTML/CSS/JS puro)
 src/shared     motores puros (layout, engine de regras, automacao, rota de captura)
-src/dexhook    micro-extensao local so-leitura do painel de caca (mundo da pagina)
+src/dexhook    micro-extensao local do painel de caca (leitura; e o P2, so com arm por execucao)
 src/main/rules packs de dados por jogo (CSS + regras + ancoras da automacao)
 test           node:test
 ```

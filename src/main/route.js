@@ -79,6 +79,10 @@ export class RouteController {
       index: 0,
       targets: slim,
       baselineC: this.baselineFor(st, slim[0]),
+      // Especies ja confirmadas nesta corrida: as DUAS fontes de confirmacao
+      // (evento de captura e delta da dex) podem chegar e nao podem fazer a
+      // fila pular dois alvos.
+      confirmados: new Set(),
       throws: 0,
       captured: 0,
       balls: st.balls ? Object.values(st.balls).reduce((s, n) => s + (Number(n) || 0), 0) : null,
@@ -130,6 +134,25 @@ export class RouteController {
   }
 
   /**
+   * Confirma a captura do alvo ATUAL e manda a pagina avancar. Idempotente
+   * por especie: quem chama (delta da dex OU evento de captura) pode chamar
+   * duas vezes pela MESMA captura — a fila nao pode pular um alvo.
+   */
+  confirmarCaptura(slotId, run, t) {
+    if (!run || !t) return false;
+    if (run.confirmados?.has(t.pokeId)) return false;
+    if (!run.confirmados) run.confirmados = new Set();
+    run.confirmados.add(t.pokeId);
+    run.captured += 1;
+    const st = this.getHuntState(slotId);
+    run.baselineC = this.baselineFor(st, t);
+    this.sendToSlot(slotId, 'route:cmd', { action: 'advance' });
+    this.log(`[route] ${slotId}: capturou ${t.nome} (${run.captured}/${run.targets.length})`);
+    this.onChange(slotId);
+    return true;
+  }
+
+  /**
    * Chamado a cada ingestion do hunt:state. Confirma a captura do alvo ATUAL
    * pelo delta real da dex e manda a pagina avancar; para a rota se as bolas
    * zerarem (e fisico, nao escolha).
@@ -140,19 +163,27 @@ export class RouteController {
     const t = run.targets[run.index];
     if (t) {
       const c = st.dex?.[String(t.pokeId)]?.c ?? 0;
-      if (c > (run.baselineC ?? 0)) {
-        run.captured += 1;
-        run.baselineC = c;
-        this.sendToSlot(slotId, 'route:cmd', { action: 'advance' });
-        this.log(`[route] ${slotId}: capturou ${t.nome} (${run.captured}/${run.targets.length})`);
-        // o proximo alvo ganha baseline quando a pagina reportar o novo index
-        this.onChange(slotId);
-      }
+      if (c > (run.baselineC ?? 0)) this.confirmarCaptura(slotId, run, t);
     }
     const totalBolas = Object.values(st.balls ?? {}).reduce((s, v) => s + (Number(v) || 0), 0);
     if (Object.keys(st.balls ?? {}).length && totalBolas <= 0) {
       this.stop(slotId, 'sem-bolas');
     }
+  }
+
+  /**
+   * Evento real de captura do servidor (`batalha` -> `capturado`), com a
+   * especie. Confirma na hora — sem esperar o delta da dex — e sem pular
+   * alvo quando a mesma captura chega pelas DUAS fontes.
+   */
+  onCapture(slotId, data) {
+    const run = this.active.get(slotId);
+    if (!run?.running || !data) return;
+    const speciesId = Number(data?.speciesId);
+    if (!Number.isInteger(speciesId) || speciesId <= 0) return;
+    const t = run.targets[run.index];
+    if (!t || t.pokeId !== speciesId) return;
+    this.confirmarCaptura(slotId, run, t);
   }
 
   /** Status que vem da pagina (motor route.js). O index da pagina manda. */
