@@ -8,29 +8,50 @@
 </head>
 <body>
   <header id="toolbar">
-    <span class="brand">Poke<span>Launcher</span></span>
-    <div id="chips"></div>
-    <button id="add" title="Nova sessão">+</button>
-    <form id="add-form" hidden>
-      <input id="add-name" placeholder="Nome" maxlength="24" required />
-      <input id="add-url" placeholder="https://pokeidle.io/app" value="https://pokeidle.io/app" />
-      <button type="submit" class="ok">OK</button>
-      <button type="button" id="add-cancel">×</button>
-      <span id="add-error" class="error"></span>
-    </form>
-    <div id="layout-btns">
-      <button data-cols="1" title="1 coluna">▯</button>
-      <button data-cols="2" class="active" title="2 colunas">▯▯</button>
-      <button data-cols="3" title="3 colunas">▯▯▯</button>
+    <div class="toolbar-sessions">
+      <span class="brand" aria-label="Poke Launcher">
+        <span class="brand-mark" aria-hidden="true"></span>
+      </span>
+      <div id="chips" aria-label="Sessões abertas"></div>
+      <button type="button" id="add" aria-label="Adicionar sessão" title="Nova sessão">+</button>
+      <form id="add-form" hidden>
+        <input id="add-name" placeholder="Nome" maxlength="24" required />
+        <input id="add-url" placeholder="https://pokeidle.io/app" value="https://pokeidle.io/app" />
+        <button type="submit" class="ok">Adicionar</button>
+        <button type="button" id="add-cancel" aria-label="Cancelar">×</button>
+        <span id="add-error" class="error"></span>
+      </form>
     </div>
-    <button id="focus-btn" title="Escolher uma sessão para ampliar">Foco</button>
-    <button id="stop-all" class="danger" hidden title="Parar todas as automacoes">Parar automações</button>
-    <button id="close-popups" class="danger" hidden>Fechar popup de login (Esc)</button>
-    <span id="diag-status" class="muted"></span>
-    <button id="hunt-btn" title="Painel de caça: o que falta capturar na área">Caça</button>
-    <button id="scripts-btn" title="UserScripts por sessão">Scripts</button>
-    <button id="diagnostics" title="Salva um relatorio dos seletores da pagina (sem dados da conta)">Diagnóstico</button>
+    <div id="layout-btns" role="group" aria-label="Colunas da grade">
+      <button type="button" data-cols="1" aria-label="Uma coluna" aria-pressed="false" title="1 coluna">▯</button>
+      <button type="button" data-cols="2" class="active" aria-label="Duas colunas" aria-pressed="true" title="2 colunas">▯▯</button>
+      <button type="button" data-cols="3" aria-label="Três colunas" aria-pressed="false" title="3 colunas">▯▯▯</button>
+    </div>
+    <div class="toolbar-tools">
+      <button type="button" id="focus-btn" aria-pressed="false" title="Escolher uma sessão para ampliar">Foco</button>
+      <button type="button" id="hunt-btn" title="Painel de caça: o que falta capturar na área">Caça</button>
+      <button type="button" id="scripts-btn" title="UserScripts por sessão">Scripts</button>
+      <button type="button" id="diagnostics" aria-label="Executar diagnóstico" title="Salva um relatório dos seletores da página (sem dados da conta)">Diagnóstico</button>
+    </div>
+    <div class="toolbar-status-group">
+      <button type="button" id="stop-all" class="danger" aria-label="Parar todas as automações" hidden title="Parar todas as automações">Parar automações</button>
+      <button type="button" id="close-popups" class="danger" aria-label="Fechar popups de login" hidden title="Fechar popup de login (Esc)">Fechar popup de login (Esc)</button>
+      <span id="diag-status" class="muted" role="status" aria-live="polite"></span>
+      <div id="toolbar-status" role="status" aria-live="polite">
+        <i class="status-dot" aria-hidden="true"></i>
+        <span id="toolbar-status-label">Launcher pronto</span>
+        <span id="toolbar-slot-count">0 sessões</span>
+      </div>
+    </div>
   </header>
+
+  <div id="focus-context" hidden aria-live="polite">
+    <span class="focus-context-title">
+      <i class="status-dot" aria-hidden="true"></i>
+      <span id="focus-context-label">PokeIdle</span>
+    </span>
+    <span id="focus-context-status">Sessão ativa</span>
+  </div>
 
   <div id="focus-modal" hidden>
     <div class="modal-card focus-card" role="dialog" aria-modal="true" aria-labelledby="focus-title">
@@ -141,6 +162,12 @@
           <input type="number" id="route-max" min="1" max="500" step="1" value="3" />
         </label>
       </div>
+
+      <label class="check">
+        <input type="checkbox" id="route-vip" />
+        <span>Usar VIP (sem arremesso automático de Poké Bolas)</span>
+      </label>
+      <p class="hint">Ative o VIP no jogo. A rota espera a captura do alvo ser confirmada antes de seguir.</p>
 
       <label class="check">
         <input type="checkbox" id="hunt-enable" />

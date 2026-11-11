@@ -6,7 +6,7 @@
  * comando `advance`.
  *
  * Estados por alvo: travel (abrir mapa/achar marcador) -> wait-hud (chegou?)
- * -> hunt (clicar cada caido da especie ate o main confirmar) -> proximo.
+ * -> hunt (arremessar ou aguardar VIP ate o main confirmar) -> proximo.
  * Sem caido na area o laço espera (spawn e do jogo). Falhas de viagem param
  * no alvo atual; somente captura confirmada ou marcador capturado avanca.
  */
@@ -25,6 +25,7 @@
     const intervalMs = Math.max(300, r.tickMs || 1200);
     const travelTimeoutMs = Math.max(3000, r.travelTimeoutMs || 20000);
     const maxBolas = Number.isFinite(config.maxBolas) && config.maxBolas > 0 ? Math.floor(config.maxBolas) : null;
+    const manualCapture = config.manualCapture === true;
 
     let i = 0;
     let phase = 'travel';
@@ -74,6 +75,7 @@
         throws: throwsTotal,
         captured,
         balls: bolas,
+        manualCapture,
       });
     };
 
@@ -213,23 +215,27 @@
             phaseStart = agora;
             throwsTarget = 0;
           }
-          bolas = lerBolas();
-          const caido = caidoDoAlvo(t.nome);
-          if (caido) {
-            if (bolas === 0) {
-              emitStatus('sem-bolas');
-              return finish('sem-bolas');
-            }
-            if (maxBolas !== null && throwsTarget >= maxBolas) {
-              return finish('limite-arremessos');
-            }
-            if (PA && PA.clickTarget(caido, doc)) {
-              throwsTarget += 1;
-              throwsTotal += 1;
-            }
-            emitStatus('arremessando');
+          if (manualCapture) {
+            emitStatus('aguardando-vip');
           } else {
-            emitStatus('esperando-caido');
+            bolas = lerBolas();
+            const caido = caidoDoAlvo(t.nome);
+            if (caido) {
+              if (bolas === 0) {
+                emitStatus('sem-bolas');
+                return finish('sem-bolas');
+              }
+              if (maxBolas !== null && throwsTarget >= maxBolas) {
+                return finish('limite-arremessos');
+              }
+              if (PA && PA.clickTarget(caido, doc)) {
+                throwsTarget += 1;
+                throwsTotal += 1;
+              }
+              emitStatus('arremessando');
+            } else {
+              emitStatus('esperando-caido');
+            }
           }
           return schedule();
         }

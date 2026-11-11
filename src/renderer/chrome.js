@@ -26,6 +26,12 @@ const focusEnterBtn = document.getElementById('focus-enter');
 const focusCancelBtn = document.getElementById('focus-cancel');
 const focusError = document.getElementById('focus-error');
 const layoutBtns = document.getElementById('layout-btns');
+const focusContext = document.getElementById('focus-context');
+const focusContextLabel = document.getElementById('focus-context-label');
+const focusContextStatus = document.getElementById('focus-context-status');
+const toolbarStatus = document.getElementById('toolbar-status');
+const toolbarStatusLabel = document.getElementById('toolbar-status-label');
+const toolbarSlotCount = document.getElementById('toolbar-slot-count');
 let editingSlot = null;
 let riskReady = false;
 let lastSlots = [];
@@ -206,19 +212,48 @@ function closeForm() {
 
 document.querySelectorAll('#layout-btns button').forEach((btn) => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('#layout-btns button').forEach((b) => b.classList.remove('active'));
-    btn.classList.add('active');
+    setLayoutSelection(Number(btn.dataset.cols));
     window.launcher.setLayout(Number(btn.dataset.cols));
   });
 });
 
+function setLayoutSelection(cols) {
+  for (const btn of layoutBtns.querySelectorAll('button')) {
+    const active = Number(btn.dataset.cols) === cols;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-pressed', String(active));
+  }
+}
+
 function syncFocusButton() {
   const active = Boolean(focusedSlotId);
+  const slot = lastSlots.find((item) => item.id === focusedSlotId);
   focusBtn.textContent = active ? 'Sair do foco' : 'Foco';
   focusBtn.classList.toggle('focus-active', active);
   focusBtn.setAttribute('aria-pressed', String(active));
   focusBtn.title = active ? 'Voltar à grade de sessões (Esc)' : 'Escolher uma sessão para ampliar';
   layoutBtns.hidden = active;
+  focusContext.hidden = !active;
+  if (active) {
+    focusContextLabel.textContent = `PokeIdle / ${slot?.name || 'Sessão'}`;
+    focusContextStatus.textContent = slot?.loggedIn ? 'Conta conectada' : 'Sessão ativa';
+  }
+}
+
+function syncToolbarStatus(slots) {
+  const routeActive = slots.some((slot) => slot.route?.running === true);
+  const automationActive = slots.some((slot) => slot.automation?.enabled === true);
+  const crashed = slots.some((slot) => slot.crashedUntil > Date.now());
+  const status = routeActive ? 'route' : automationActive ? 'automation' : crashed ? 'attention' : 'ready';
+  toolbarStatus.dataset.state = status;
+  toolbarStatusLabel.textContent = routeActive
+    ? 'Rota ativa'
+    : automationActive
+      ? 'Automação ativa'
+      : crashed
+        ? 'Reconectando sessão'
+        : 'Launcher pronto';
+  toolbarSlotCount.textContent = `${slots.length} ${slots.length === 1 ? 'sessão' : 'sessões'} ativa${slots.length === 1 ? '' : 's'}`;
 }
 
 function selectFocusSlot(id) {
@@ -370,8 +405,16 @@ function createChip() {
   const dot = document.createElement('i');
   dot.className = 'dot';
   chip.appendChild(dot);
+  const copy = document.createElement('span');
+  copy.className = 'chip-copy';
   const label = document.createElement('span');
-  chip.appendChild(label);
+  label.className = 'chip-name';
+  label.setAttribute('role', 'button');
+  label.tabIndex = 0;
+  const status = document.createElement('span');
+  status.className = 'chip-status';
+  copy.append(label, status);
+  chip.appendChild(copy);
   const tag = document.createElement('span');
   tag.className = 'tag';
   tag.hidden = true;
@@ -395,7 +438,7 @@ function createChip() {
   x.setAttribute('role', 'button');
   x.tabIndex = 0;
   chip.appendChild(x);
-  const view = { chip, dot, label, tag, light, auto, p2, slot: null, rename: null, lightError: false, lightNote: '' };
+  const view = { chip, dot, copy, label, status, tag, light, auto, p2, slot: null, rename: null, lightError: false, lightNote: '' };
   chip.addEventListener('click', () => {
     if (!view.slot) return;
     if (focusedSlotId) {
@@ -419,7 +462,7 @@ function createChip() {
     input.value = original;
     input.maxLength = 24;
     input.spellcheck = false;
-    chip.replaceChild(input, label);
+    copy.replaceChild(input, label);
     input.focus();
     input.select();
     let done = false;
@@ -427,7 +470,7 @@ function createChip() {
       if (done) return;
       done = true;
       const nome = input.value.trim().slice(0, 24);
-      chip.replaceChild(label, input);
+      copy.replaceChild(label, input);
       label.textContent = original;
       if (salvar && nome && nome !== original) {
         await window.launcher.renameSlot(view.slot.id, nome).catch(() => {});
@@ -452,6 +495,12 @@ function createChip() {
   label.addEventListener('dblclick', (e) => {
     e.stopPropagation();
     view.rename();
+  });
+  label.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    e.stopPropagation();
+    chip.click();
   });
   const fechar = () => {
     if (!view.slot) return;
@@ -513,6 +562,13 @@ function updateChip(view, s) {
       : 'Sem login';
   view.label.textContent = crashIn > 0 ? `${s.name} — caiu, voltando` : s.name;
   view.label.title = 'Duplo clique para renomear';
+  view.status.textContent = crashIn > 0
+    ? 'Reconectando'
+    : s.focused
+      ? 'Em foco'
+      : s.loggedIn
+        ? 'Conta conectada'
+        : 'Sessão ativa';
   view.tag.hidden = s.muted !== true;
   view.tag.textContent = s.muted === true ? 'MUDO' : '';
   view.tag.title = s.muted === true ? 'Som desta sessao silenciado' : '';
@@ -558,6 +614,7 @@ window.launcher.onState((slots) => {
   lastSlots = slots;
   focusedSlotId = slots.find((slot) => slot.focused === true)?.id ?? null;
   syncFocusButton();
+  syncToolbarStatus(slots);
   if (!focusModal.hidden) renderFocusSlots();
   const ids = new Set(slots.map((s) => s.id));
   for (const [id, view] of chipViews) {
@@ -853,6 +910,7 @@ const routeRisk = document.getElementById('route-risk');
 const routeAck = document.getElementById('route-ack');
 const routeOrdem = document.getElementById('route-ordem');
 const routeMax = document.getElementById('route-max');
+const routeVip = document.getElementById('route-vip');
 const routeStatus = document.getElementById('route-status');
 const routeMsg = document.getElementById('route-msg');
 const routeStart = document.getElementById('route-start');
@@ -878,6 +936,7 @@ const ROUTE_STATE_LABELS = {
   'aguardando-chegada': 'aguardando confirmação de chegada',
   'aguardando-alvo': 'aguardando o alvo atual',
   'esperando-caido': 'aguardando o Pokémon aparecer',
+  'aguardando-vip': 'aguardando captura do VIP',
   arremessando: 'tentando capturar',
   capturado: 'captura confirmada',
   'skip-capturado': 'já capturado; seguindo fila',
@@ -910,6 +969,7 @@ function renderRouteStatus(st) {
   routeAck.disabled = running;
   routeOrdem.disabled = running;
   routeMax.disabled = running;
+  routeVip.disabled = running;
   if (routeWasRunning && !running) {
     // consentimento e por execucao: a fila acabou, o proximo fogo exige ack de novo
     routeAck.checked = false;
@@ -929,11 +989,14 @@ function renderRouteStatus(st) {
     parts.push(`alvo ${Math.min((st.index ?? 0) + 1, st.total)}/${st.total}${st.targetNome ? ` (${st.targetNome})` : ''}`);
   }
   parts.push(`${st.captured ?? 0} capturada(s)`);
-  parts.push(`${st.throws ?? 0} arremesso(s)`);
+  if (st.manualCapture) parts.push('VIP: captura pelo jogo');
+  else parts.push(`${st.throws ?? 0} arremesso(s)`);
   // o balls VIVO vem da rota (pagina le o titulo da bola no DOM); o espelho do
   // welcome congela porque o jogo nao manda balls nos deltas — usar so como fallback
-  const bolas = Number.isFinite(st.balls) ? st.balls : bolasTotais(lastBalls);
-  if (bolas !== null && bolas !== undefined) parts.push(`${bolas} bolas`);
+  if (!st.manualCapture) {
+    const bolas = Number.isFinite(st.balls) ? st.balls : bolasTotais(lastBalls);
+    if (bolas !== null && bolas !== undefined) parts.push(`${bolas} bolas`);
+  }
   routeStatus.textContent = `Rota: ${parts.join(' · ')}`;
 }
 
@@ -1153,6 +1216,7 @@ routeStart.addEventListener('click', async () => {
       ordem: routeOrdem.value,
       maxAlvos: Number(routeMax.value) || 3,
       levelCap: huntLevelcap.checked,
+      manualCapture: routeVip.checked,
     });
     if (!res?.ok) {
       showRouteMsg(res?.error || 'Não foi possível ligar a rota.', true);

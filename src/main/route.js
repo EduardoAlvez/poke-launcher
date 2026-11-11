@@ -2,7 +2,7 @@
  * Controlador da rota "capturar um por um" (Fase 10) no processo principal.
  * Decide QUANDO pode ligar (consentimento explicito + dex lida) e PARA em
  * evento real: o delta da dex (`dexMud` visto pelo hook) confirma a captura do
- * alvo atual — nada de adivinhar por texto. A EXECUCAO (cliques) fica no
+ * alvo atual — nada de adivinhar por texto. A viagem e os cliques ficam no
  * motor da pagina (`src/shared/route.js`); aqui so fila, gate e verdade.
  */
 
@@ -10,9 +10,9 @@ import { catalogMissing } from './hunt-report.js';
 import { buildRoute } from './hunt-route.js';
 
 export const ROUTE_RISK_TEXT = [
-  'A rota viaja SOZINHA pelo mapa e arremessa bolas ate capturar cada especie que falta na sua dex.',
+  'A rota viaja SOZINHA pelo mapa. No modo normal, tambem arremessa bolas ate capturar cada especie que falta na sua dex; no modo VIP, aguarda a captura feita pelo jogo.',
   'Automatizar viola os Termos de Uso do PokeIdle e pode resultar em ban permanente desta conta.',
-  'Capturar e caro: a taxa por arremesso e baixa e, sem teto, a rota pode zerar suas bolas.',
+  'No modo normal, capturar e caro: a taxa por arremesso e baixa e a rota pode zerar suas bolas.',
   'A rota depende da leitura da dex ligada (extensao local so-leitura) — o queue vem dela.',
 ].join(' ');
 
@@ -50,6 +50,7 @@ export class RouteController {
       throws: run.throws,
       captured: run.captured,
       balls: run.balls,
+      manualCapture: run.manualCapture,
       startedAt: run.startedAt,
     };
   }
@@ -71,6 +72,7 @@ export class RouteController {
       enabled: true,
       targets: slim,
       maxBolas: opts.maxBolas,
+      manualCapture: opts.manualCapture === true,
     };
     this.active.set(slotId, {
       running: true,
@@ -84,12 +86,13 @@ export class RouteController {
       confirmados: new Set(),
       throws: 0,
       captured: 0,
+      manualCapture: opts.manualCapture === true,
       balls: st.balls ? Object.values(st.balls).reduce((s, n) => s + (Number(n) || 0), 0) : null,
       startedAt: Date.now(),
       lastPayload: { config, pack: opts.pack || {} },
     });
     this.sendToSlot(slotId, 'route:config', this.active.get(slotId).lastPayload);
-    this.log(`[route] ${slotId}: ligada (${slim.length} alvos, ordem ${opts.ordem || 'facil'})`);
+    this.log(`[route] ${slotId}: ligada (${slim.length} alvos, ordem ${opts.ordem || 'facil'}, modo ${opts.manualCapture ? 'VIP' : 'arremesso'})`);
     this.onChange();
     return { ok: true, targets: slim.length };
   }
@@ -153,8 +156,8 @@ export class RouteController {
 
   /**
    * Chamado a cada ingestion do hunt:state. Confirma a captura do alvo ATUAL
-   * pelo delta real da dex e manda a pagina avancar; para a rota se as bolas
-   * zerarem (e fisico, nao escolha).
+   * pelo delta real da dex e manda a pagina avancar; no modo de arremesso,
+   * para a rota se as bolas zerarem (e fisico, nao escolha).
    */
   onHuntUpdate(slotId, st) {
     const run = this.active.get(slotId);
@@ -165,7 +168,7 @@ export class RouteController {
       if (c > (run.baselineC ?? 0)) this.confirmarCaptura(slotId, run, t);
     }
     const totalBolas = Object.values(st.balls ?? {}).reduce((s, v) => s + (Number(v) || 0), 0);
-    if (Object.keys(st.balls ?? {}).length && totalBolas <= 0) {
+    if (!run.manualCapture && Object.keys(st.balls ?? {}).length && totalBolas <= 0) {
       this.stop(slotId, 'sem-bolas');
     }
   }

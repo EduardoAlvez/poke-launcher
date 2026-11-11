@@ -1,4 +1,5 @@
-export const TOOLBAR_H = 44;
+export const TOOLBAR_H = 64;
+export const FOCUS_CONTEXT_H = 42;
 
 export function computeGrid(count, contentBounds, { cols, gap = 8, topOffset = TOOLBAR_H }) {
   if (count <= 0 || cols <= 0) return [];

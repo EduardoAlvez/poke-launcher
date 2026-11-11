@@ -310,7 +310,7 @@ function createWindow() {
     height: 900,
     minWidth: 720,
     minHeight: 420,
-    backgroundColor: '#14161b',
+    backgroundColor: '#eef3f2',
     webPreferences: {
       preload: path.join(dirname, '../preload/chrome.cjs'),
       sandbox: true,
@@ -892,6 +892,7 @@ ipcMain.handle('launcher:route-set', async (event, payload) => {
       ordem: ['facil', 'xp', 'regiao'].includes(payload?.ordem) ? payload.ordem : 'facil',
       maxAlvos: Number.isInteger(maxAlvos) && maxAlvos >= 1 && maxAlvos <= 500 ? maxAlvos : 3,
       levelCap: payload?.levelCap !== false,
+      manualCapture: payload?.manualCapture === true,
       maxBolas: Number.isFinite(payload?.maxBolas) && payload.maxBolas > 0 ? Math.floor(payload.maxBolas) : null,
       pack: automationPack,
     });
@@ -1120,6 +1121,7 @@ ipcMain.handle('automation:risk-text', (event) => {
 
 app.whenReady().then(async () => {
   if (!singleInstance) return;
+  Menu.setApplicationMenu(null);
   app.setAppUserModelId(app.isPackaged ? 'dev.pokelauncher.app' : process.execPath);
   Notification.handleActivation?.(() => showWindow());
   // A janela vem antes de qualquer trabalho de disco: uma falha de FS aqui

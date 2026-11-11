@@ -118,16 +118,18 @@ já capturou e **quais ainda faltam** no catálogo do jogo. É **opt-in**: nada 
 
 ### Rota de captura ("capturar um por um")
 
-No mesmo painel, a **Rota** usa a lista de faltantes para trabalhar a dex sozinha: o launcher abre o
-Mapa, troca de região quando precisa, viaja até a caçada do alvo e arremessa em cada caído da espécie
-até capturar — então passa ao próximo alvo da fila (ordem por nível/XP/região, limite de alvos).
+No mesmo painel, a **Rota** usa a lista de faltantes para trabalhar a dex: o launcher abre o Mapa,
+troca de região quando precisa e viaja até a caçada do alvo. No modo padrão, arremessa em cada caído
+da espécie até capturar; com **Usar VIP**, apenas espera o jogo confirmar a captura. Nos dois modos,
+só então passa ao próximo alvo da fila (ordem por nível/XP/região, limite de alvos).
 
 - É **automação completa**: os mesmos riscos da seção de Automação acima, com comportamento mais robusto
-  de bot (viagem + captura em série). Detectável em princípio; o risco de ban é seu.
-- **Custo real de bolas**: capturar espécies novas pode exigir centenas/milhares de arremessos por
-  espécie. A rota lê o estoque da bola selecionada direto no DOM a cada arremesso e **para quando ele
-  zera** (o `welcome` do jogo congela esse número, então não confiaríamos nele). Ainda assim, comece
-  com poucos alvos.
+  de bot (viagem automática e, no modo padrão, captura em série). Detectável em princípio; o risco de ban é seu.
+- **Modo padrão**: capturar espécies novas pode exigir centenas/milhares de arremessos por espécie. A
+  rota lê o estoque da bola selecionada direto no DOM a cada arremesso e **para quando ele zera**.
+  Comece com poucos alvos.
+- **Modo VIP**: marque **Usar VIP** e ative o VIP no jogo. A rota não clica nos Pokémon, não gasta
+  bolas e permanece no alvo até o servidor confirmar a captura pela dex ou pelo evento de captura.
 - A rota **espera a captura confirmada sem limite de tempo**; se não localizar o alvo ou não confirmar
   a chegada, para nesse alvo e mostra o motivo, sem pular para o próximo.
 - A rota **não escreve no socket**: cada passo é clique de usuário simulado no DOM, como o AUTO já faz;

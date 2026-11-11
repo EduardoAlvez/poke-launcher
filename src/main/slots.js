@@ -1,5 +1,12 @@
 import { WebContentsView } from 'electron';
-import { computeGrid, computeFocusBounds, isSlotVisible, popupBounds, TOOLBAR_H } from './layout.js';
+import {
+  computeGrid,
+  computeFocusBounds,
+  FOCUS_CONTEXT_H,
+  isSlotVisible,
+  popupBounds,
+  TOOLBAR_H,
+} from './layout.js';
 import { installSlotExtensions } from './extensions.js';
 import { installDexHook } from './dex-hook.js';
 import { registerAddonPreload, matchesGame } from './addons.js';
@@ -400,7 +407,9 @@ export class SlotRegistry {
       this.focusedSlotId = null;
       this.onFocusChange?.(null);
     }
-    const focusBounds = this.focusedSlotId ? computeFocusBounds(bounds) : null;
+    const focusBounds = this.focusedSlotId
+      ? computeFocusBounds(bounds, { topOffset: TOOLBAR_H + FOCUS_CONTEXT_H })
+      : null;
     const rects = computeGrid(this.slots.length, bounds, {
       cols: this.cols,
       topOffset: TOOLBAR_H,
