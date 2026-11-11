@@ -703,6 +703,11 @@ ipcMain.handle('launcher:set-layout', (event, payload) => {
   return true;
 });
 
+ipcMain.handle('launcher:set-toolbar-collapsed', (event, payload) => {
+  if (!isChrome(event.sender)) return false;
+  return registry.setToolbarCollapsed(payload?.collapsed);
+});
+
 ipcMain.handle('launcher:set-focus', (event, payload) => {
   if (!isChrome(event.sender)) return { ok: false, error: 'origem invalida' };
   const id = payload?.id;

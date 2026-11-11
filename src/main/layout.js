@@ -1,4 +1,5 @@
 export const TOOLBAR_H = 64;
+export const COLLAPSED_TOOLBAR_H = 30;
 export const FOCUS_CONTEXT_H = 42;
 
 export function computeGrid(count, contentBounds, { cols, gap = 8, topOffset = TOOLBAR_H }) {

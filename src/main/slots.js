@@ -5,6 +5,7 @@ import {
   FOCUS_CONTEXT_H,
   isSlotVisible,
   popupBounds,
+  COLLAPSED_TOOLBAR_H,
   TOOLBAR_H,
 } from './layout.js';
 import { installSlotExtensions } from './extensions.js';
@@ -35,6 +36,7 @@ export class SlotRegistry {
     this.slots = [];
     this.seq = 0;
     this.cols = 2;
+    this.toolbarHeight = TOOLBAR_H;
     this.focusedSlotId = null;
     this.viewsVisible = true;
     this.win = null;
@@ -281,6 +283,13 @@ export class SlotRegistry {
     this.syncViewVisibility();
   }
 
+  setToolbarCollapsed(collapsed) {
+    if (typeof collapsed !== 'boolean') return false;
+    this.toolbarHeight = collapsed ? COLLAPSED_TOOLBAR_H : TOOLBAR_H;
+    if (this.win && !this.win.isDestroyed()) this.layout(this.win);
+    return true;
+  }
+
   setFocusedSlot(id) {
     if (id !== null && !this.get(id)) return false;
     const changed = this.focusedSlotId !== id;
@@ -422,11 +431,11 @@ export class SlotRegistry {
       this.onFocusChange?.(null);
     }
     const focusBounds = this.focusedSlotId
-      ? computeFocusBounds(bounds, { topOffset: TOOLBAR_H + FOCUS_CONTEXT_H })
+      ? computeFocusBounds(bounds, { topOffset: this.toolbarHeight + FOCUS_CONTEXT_H })
       : null;
     const rects = computeGrid(this.slots.length, bounds, {
       cols: this.cols,
-      topOffset: TOOLBAR_H,
+      topOffset: this.toolbarHeight,
     });
     const gridIsValid = rects.length === this.slots.length;
     this.slots.forEach((slot, i) => {
@@ -434,7 +443,7 @@ export class SlotRegistry {
       const rect = slot.id === this.focusedSlotId ? focusBounds : gridIsValid ? rects[i] : null;
       if (rect) slot.view.setBounds(rect);
     });
-    const pRect = popupBounds(bounds);
+    const pRect = popupBounds(bounds, { topOffset: this.toolbarHeight });
     for (const slot of this.slots) {
       for (const popup of slot.popups) {
         if (!win.contentView.children.includes(popup)) win.contentView.addChildView(popup);

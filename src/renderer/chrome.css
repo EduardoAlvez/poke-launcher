@@ -72,6 +72,24 @@ body {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
+#toolbar.collapsed {
+  justify-content: flex-end;
+  height: 30px;
+  min-height: 30px;
+  padding: 0 12px;
+  background: var(--surface-soft);
+}
+#toolbar.collapsed > :not(#toolbar-toggle) { display: none; }
+#toolbar-toggle {
+  flex: 0 0 36px;
+  width: 36px;
+  min-height: 36px;
+  padding: 0;
+  color: var(--muted-strong);
+  font-size: 17px;
+  line-height: 1;
+}
+#toolbar.collapsed #toolbar-toggle { min-height: 26px; height: 26px; }
 .toolbar-sessions {
   position: relative;
   display: flex;
@@ -120,9 +138,17 @@ body {
   min-width: 72px;
   height: 100%;
   overflow-x: auto;
-  scrollbar-width: none;
+  overscroll-behavior-inline: contain;
+  scrollbar-color: var(--muted) transparent;
+  scrollbar-width: thin;
+  touch-action: pan-x;
+  cursor: grab;
 }
-#chips::-webkit-scrollbar { display: none; }
+#chips.dragging { cursor: grabbing; }
+#chips.dragging .chip { cursor: grabbing; }
+#chips::-webkit-scrollbar { height: 4px; }
+#chips::-webkit-scrollbar-track { background: transparent; }
+#chips::-webkit-scrollbar-thumb { border-radius: 4px; background: var(--muted); }
 .chip {
   display: inline-flex;
   align-items: center;

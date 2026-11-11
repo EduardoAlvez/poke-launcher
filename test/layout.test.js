@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeGrid, computeFocusBounds, isSlotVisible, popupBounds, TOOLBAR_H } from '../src/main/layout.js';
+import { computeGrid, computeFocusBounds, isSlotVisible, popupBounds, COLLAPSED_TOOLBAR_H, TOOLBAR_H } from '../src/main/layout.js';
 
 const bounds = { width: 808, height: 608 };
 
@@ -15,6 +15,16 @@ test('modo foco usa toda a area abaixo da toolbar', () => {
     width: bounds.width,
     height: bounds.height - TOOLBAR_H,
   });
+});
+
+test('barra recolhida libera altura para a grade e o modo foco', () => {
+  const [grid] = computeGrid(1, bounds, { cols: 1, topOffset: COLLAPSED_TOOLBAR_H });
+  const focus = computeFocusBounds(bounds, { topOffset: COLLAPSED_TOOLBAR_H });
+
+  assert.equal(grid.y, COLLAPSED_TOOLBAR_H + 8);
+  assert.equal(focus.y, COLLAPSED_TOOLBAR_H);
+  assert.equal(focus.height, bounds.height - COLLAPSED_TOOLBAR_H);
+  assert.equal(TOOLBAR_H - COLLAPSED_TOOLBAR_H, 34);
 });
 
 test('modo foco retorna vazio quando nao ha area util', () => {
@@ -92,4 +102,10 @@ test('popupBounds nao estoura janela pequena', () => {
   assert.ok(p.x >= 0 && p.y >= TOOLBAR_H);
   assert.ok(p.x + p.width <= 400);
   assert.ok(p.y + p.height <= 300);
+});
+
+test('popupBounds acompanha o topo da toolbar recolhida', () => {
+  const p = popupBounds(bounds, { topOffset: COLLAPSED_TOOLBAR_H });
+  assert.equal(p.y, COLLAPSED_TOOLBAR_H + 8);
+  assert.ok(p.y + p.height <= bounds.height);
 });

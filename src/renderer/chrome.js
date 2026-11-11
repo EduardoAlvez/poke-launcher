@@ -32,11 +32,87 @@ const focusContextStatus = document.getElementById('focus-context-status');
 const toolbarStatus = document.getElementById('toolbar-status');
 const toolbarStatusLabel = document.getElementById('toolbar-status-label');
 const toolbarSlotCount = document.getElementById('toolbar-slot-count');
+const toolbar = document.getElementById('toolbar');
+const toolbarToggle = document.getElementById('toolbar-toggle');
+const toolbarToggleIcon = document.getElementById('toolbar-toggle-icon');
 let editingSlot = null;
 let riskReady = false;
 let lastSlots = [];
 let focusedSlotId = null;
 let selectedFocusSlotId = null;
+
+toolbarToggle.addEventListener('click', () => {
+  const collapsed = !toolbar.classList.contains('collapsed');
+  toolbar.classList.toggle('collapsed', collapsed);
+  toolbarToggle.setAttribute('aria-expanded', String(!collapsed));
+  toolbarToggle.setAttribute('aria-label', collapsed ? 'Mostrar barra superior' : 'Recolher barra superior');
+  toolbarToggle.title = collapsed ? 'Mostrar barra superior' : 'Recolher barra superior';
+  toolbarToggleIcon.textContent = collapsed ? '⌄' : '⌃';
+  window.launcher.setToolbarCollapsed(collapsed);
+});
+
+let chipsPointer = null;
+let draggedChip = null;
+let clearDraggedChipTimer = null;
+
+chips.addEventListener('wheel', (event) => {
+  const maxScroll = chips.scrollWidth - chips.clientWidth;
+  if (maxScroll <= 0) return;
+  const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+  if (!delta) return;
+  const next = Math.max(0, Math.min(maxScroll, chips.scrollLeft + delta));
+  if (next !== chips.scrollLeft) {
+    chips.scrollLeft = next;
+    event.preventDefault();
+  }
+}, { passive: false });
+
+chips.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0 || event.target.closest('button, input')) return;
+  draggedChip = null;
+  clearTimeout(clearDraggedChipTimer);
+  chipsPointer = {
+    id: event.pointerId,
+    x: event.clientX,
+    y: event.clientY,
+    scrollLeft: chips.scrollLeft,
+    chip: event.target.closest('.chip'),
+    dragging: false,
+  };
+});
+
+chips.addEventListener('pointermove', (event) => {
+  if (!chipsPointer || event.pointerId !== chipsPointer.id) return;
+  const dx = event.clientX - chipsPointer.x;
+  const dy = event.clientY - chipsPointer.y;
+  if (!chipsPointer.dragging && Math.abs(dx) > 5 && Math.abs(dx) > Math.abs(dy)) {
+    chipsPointer.dragging = true;
+    chips.classList.add('dragging');
+    chips.setPointerCapture(event.pointerId);
+  }
+  if (chipsPointer.dragging) chips.scrollLeft = chipsPointer.scrollLeft - dx;
+});
+
+function endChipsPointer(event) {
+  if (!chipsPointer || (event && event.pointerId !== chipsPointer.id)) return;
+  if (chipsPointer.dragging) {
+    draggedChip = chipsPointer.chip;
+    chips.classList.remove('dragging');
+    if (event && chips.hasPointerCapture(event.pointerId)) chips.releasePointerCapture(event.pointerId);
+    clearDraggedChipTimer = setTimeout(() => { draggedChip = null; }, 200);
+  }
+  chipsPointer = null;
+}
+
+chips.addEventListener('pointerup', endChipsPointer);
+chips.addEventListener('pointercancel', endChipsPointer);
+chips.addEventListener('click', (event) => {
+  if (!event.detail || !draggedChip || event.target.closest('.chip') !== draggedChip) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  draggedChip = null;
+  clearTimeout(clearDraggedChipTimer);
+}, true);
 
 modalSave.disabled = true;
 window.launcher
@@ -635,6 +711,7 @@ window.launcher.onState((slots) => {
       view = createChip();
       chipViews.set(s.id, view);
       chips.appendChild(view.chip);
+      requestAnimationFrame(() => chips.scrollTo({ left: chips.scrollWidth, behavior: 'smooth' }));
     }
     updateChip(view, s);
   }
