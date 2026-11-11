@@ -372,7 +372,7 @@ test('maquina: slug invalido nunca vira selector; sem alvos termina na hora', ()
   });
   for (let n = 0; n < 40 && api.isRunning(); n += 1) win.flush();
   const states = emits.map((e) => e.state);
-  assert.ok(states.includes('skip-marcador'), states.join(',')); // esgotou as abas sem crash
+  assert.ok(states.includes('alvo-nao-localizado'), states.join(','));
   assert.equal(api.isRunning(), false);
   const vazio = globalThis.PokeRoute.installRoute({
     config: { enabled: true, targets: [] },
@@ -442,33 +442,90 @@ test('maquina: marcador .capturado pula sem gastar viagem nem bola', () => {
   assert.equal(api.isRunning(), false);
 });
 
-test('maquina: deadline ABSOLUTO por alvo mesmo com HUD oscilando (travel<->hunt)', () => {
+test('maquina: continua no alvo depois de dois minutos sem captura', () => {
   nowMs = 1000;
   const doc = fakeDoc({
     tabs: ['kanto'],
-    markersByTab: { z: { tab: 'kanto' } },
+    markersByTab: { z: { tab: 'kanto' }, q: { tab: 'kanto' } },
     hudPokeId: '5',
     caidos: { nome: 'Z', present: true },
   });
   const win = fakeWin({ stepMs: 50_000 }); // cada tick "passa" 50 s
   const emits = [];
   const api = globalThis.PokeRoute.installRoute({
-    config: { enabled: true, targets: [{ pokeId: 5, slug: 'z', nome: 'Z' }], maxTempoMs: 120_000 },
+    config: { enabled: true, targets: [
+      { pokeId: 5, slug: 'z', nome: 'Z' },
+      { pokeId: 6, slug: 'q', nome: 'Q' },
+    ] },
     pack: PACK,
     emit: (e) => emits.push(e),
     doc,
     win,
     now,
   });
-  win.flush(); // hunt, arremesso 1 (agora 51k)
-  // concorrente senta na area: HUD sai do alvo -> travel -> marcador -> wait-hud
-  doc._probe.hud.dataset.pokeId = '999';
-  win.flush(); // fora do alvo: re-clica marcador (agora 101k)
-  doc._probe.hud.dataset.pokeId = '5'; // volta
-  win.flush(); // hunt de novo, mas o deadline ABSOLUTO (121k) venceu (agora 151k)
-  const states = emits.map((e) => e.state);
-  assert.ok(states.includes('skip-tempo'), states.join(','));
-  assert.equal(api.isRunning(), false);
+  for (let n = 0; n < 4; n += 1) win.flush(); // 200 s sem captura
+  assert.equal(api.getState().index, 0, 'permanece no primeiro alvo');
+  assert.equal(api.isRunning(), true, 'espera a confirmação em vez de pular');
+  assert.equal(emits.some((e) => e.state === 'skip-tempo'), false);
+});
+
+test('maquina: falha ao chegar para no alvo atual sem avançar', () => {
+  nowMs = 1000;
+  const doc = fakeDoc({
+    tabs: ['kanto'],
+    markersByTab: { z: { tab: 'kanto' }, q: { tab: 'kanto' } },
+    hudPokeId: '99',
+    caidos: { present: false },
+  });
+  const win = fakeWin({ stepMs: 10_000 });
+  const emits = [];
+  const api = globalThis.PokeRoute.installRoute({
+    config: { enabled: true, targets: [
+      { pokeId: 5, slug: 'z', nome: 'Z' },
+      { pokeId: 6, slug: 'q', nome: 'Q' },
+    ] },
+    pack: PACK,
+    emit: (e) => emits.push(e),
+    doc,
+    win,
+    now,
+  });
+  for (let n = 0; n < 5 && api.isRunning(); n += 1) win.flush();
+  const final = emits[emits.length - 1];
+  assert.equal(final.state, 'falha-chegada');
+  assert.equal(final.index, 0);
+  assert.equal(final.running, false);
+  assert.equal(api.getState().index, 0);
+});
+
+test('maquina: limite de arremessos para a rota no alvo sem pular', () => {
+  nowMs = 1000;
+  const doc = fakeDoc({
+    tabs: ['kanto'],
+    markersByTab: { z: { tab: 'kanto' }, q: { tab: 'kanto' } },
+    hudPokeId: '5',
+    caidos: { nome: 'Z', present: true },
+  });
+  const win = fakeWin();
+  const emits = [];
+  const api = globalThis.PokeRoute.installRoute({
+    config: { enabled: true, maxBolas: 1, targets: [
+      { pokeId: 5, slug: 'z', nome: 'Z' },
+      { pokeId: 6, slug: 'q', nome: 'Q' },
+    ] },
+    pack: PACK,
+    emit: (e) => emits.push(e),
+    doc,
+    win,
+    now,
+  });
+  win.flush(); // primeiro arremesso
+  win.flush(); // o teto e atingido antes de tentar outro
+  const final = emits[emits.length - 1];
+  assert.equal(final.state, 'limite-arremessos');
+  assert.equal(final.index, 0);
+  assert.equal(final.running, false);
+  assert.equal(api.getState().index, 0);
 });
 
 // O bug do primeiro fogo real (2026-11-10): o jogo fecha o mapa ao viajar mas
@@ -509,14 +566,14 @@ test('maquina: mapa fechou com aba .on ORFA -> reabre sozinho e segue (bug do fo
   const states = emits.map((e) => e.state);
   assert.ok(states.includes('abrindo-mapa'), states.join(','));
   assert.ok(doc._probe.mapaBtn._clicks >= 1, 'clicou Mapa de novo');
-  assert.ok(doc._probe.aberto(), 'mapa reabriu');
+  assert.ok(emits.some((e) => e.state === 'viajando' && e.index === 1), 'reabriu e selecionou o destino B');
   doc._probe.hud.dataset.pokeId = '2';
   for (let n = 0; n < 4; n += 1) win.flush();
   assert.ok(emits.some((e) => e.state === 'arremessando' && e.index === 1), 'chegou e arremessou no B');
   assert.equal(api.isRunning(), true);
 });
 
-test('maquina: sem conseguir abrir o mapa, tenta N vezes bounded e pula o alvo', () => {
+test('maquina: sem conseguir abrir o mapa, para no alvo sem pular a fila', () => {
   nowMs = 1000;
   const doc = fakeDoc({
     tabs: ['kanto', 'johto'],
@@ -529,7 +586,10 @@ test('maquina: sem conseguir abrir o mapa, tenta N vezes bounded e pula o alvo',
   const win = fakeWin();
   const emits = [];
   const api = globalThis.PokeRoute.installRoute({
-    config: { enabled: true, targets: [{ pokeId: 1, slug: 'a', nome: 'A' }] },
+    config: { enabled: true, targets: [
+      { pokeId: 1, slug: 'a', nome: 'A' },
+      { pokeId: 2, slug: 'b', nome: 'B' },
+    ] },
     pack: PACK,
     emit: (e) => emits.push(e),
     doc,
@@ -538,7 +598,11 @@ test('maquina: sem conseguir abrir o mapa, tenta N vezes bounded e pula o alvo',
   });
   for (let n = 0; n < 60 && api.isRunning(); n += 1) win.flush();
   const states = emits.map((e) => e.state);
-  assert.ok(states.includes('skip-marcador'), states.join(','));
+  assert.ok(states.includes('alvo-nao-localizado'), states.join(','));
+  assert.equal(states.includes('skip-marcador'), false);
+  const final = emits[emits.length - 1];
+  assert.equal(final.index, 0);
+  assert.equal(final.state, 'alvo-nao-localizado');
   assert.equal(api.isRunning(), false);
   assert.ok(doc._probe.mapaBtn._clicks < 60, 'nao clicou Mapa para sempre');
 });

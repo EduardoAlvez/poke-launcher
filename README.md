@@ -126,6 +126,8 @@ até capturar — então passa ao próximo alvo da fila (ordem por nível/XP/reg
   espécie. A rota lê o estoque da bola selecionada direto no DOM a cada arremesso e **para quando ele
   zera** (o `welcome` do jogo congela esse número, então não confiaríamos nele). Ainda assim, comece
   com poucos alvos.
+- A rota **espera a captura confirmada sem limite de tempo**; se não localizar o alvo ou não confirmar
+  a chegada, para nesse alvo e mostra o motivo, sem pular para o próximo.
 - A rota **não escreve no socket**: cada passo é clique de usuário simulado no DOM, como o AUTO já faz;
   a confirmação de captura vem do delta real da dex (a leitura do painel precisa estar ligada).
 - Botão **Parar rota** no painel, **Parar automações** na toolbar/bandeja também derruba a rota, e o

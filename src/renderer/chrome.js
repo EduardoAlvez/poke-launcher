@@ -718,6 +718,26 @@ let cachedRouteRisk = '';
 let cachedP2Risk = '';
 let routeWasRunning = false;
 let lastBalls = null;
+const ROUTE_STATE_LABELS = {
+  partindo: 'iniciando',
+  'procurando-regiao': 'procurando região',
+  'abrindo-mapa': 'abrindo mapa',
+  viajando: 'viajando para o local',
+  'aguardando-chegada': 'aguardando confirmação de chegada',
+  'aguardando-alvo': 'aguardando o alvo atual',
+  'esperando-caido': 'aguardando o Pokémon aparecer',
+  arremessando: 'tentando capturar',
+  capturado: 'captura confirmada',
+  'skip-capturado': 'já capturado; seguindo fila',
+  'fila-completa': 'fila concluída',
+  'alvo-nao-localizado': 'alvo não localizado; rota parada',
+  'falha-chegada': 'chegada não confirmada; rota parada',
+  'limite-arremessos': 'limite de arremessos atingido; rota parada',
+  'sem-bolas': 'sem bolas; rota parada',
+  desligada: 'rota desligada',
+  parado: 'rota parada',
+  erro: 'erro na rota; tentando novamente',
+};
 
 function bolasTotais(balls) {
   if (!balls || typeof balls !== 'object') return null;
@@ -752,7 +772,7 @@ function renderRouteStatus(st) {
     return;
   }
   routeStatus.hidden = false;
-  const parts = [st.state || 'parada'];
+  const parts = [ROUTE_STATE_LABELS[st.state] || st.state || 'parada'];
   if (st.total) {
     parts.push(`alvo ${Math.min((st.index ?? 0) + 1, st.total)}/${st.total}${st.targetNome ? ` (${st.targetNome})` : ''}`);
   }

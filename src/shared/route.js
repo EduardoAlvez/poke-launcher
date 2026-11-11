@@ -7,8 +7,8 @@
  *
  * Estados por alvo: travel (abrir mapa/achar marcador) -> wait-hud (chegou?)
  * -> hunt (clicar cada caido da especie ate o main confirmar) -> proximo.
- * Sem caido na area o laço espera (spawn e do jogo); o skip por tempo e o
- * teto de bolas protegem de travar num alvo impossivel.
+ * Sem caido na area o laço espera (spawn e do jogo). Falhas de viagem param
+ * no alvo atual; somente captura confirmada ou marcador capturado avanca.
  */
 (function (root) {
   const PA = root.PokeAutomation; // reusa isVisible/clickTarget/findFirst do motor
@@ -24,13 +24,11 @@
     const r = pack.route || {};
     const intervalMs = Math.max(300, r.tickMs || 1200);
     const travelTimeoutMs = Math.max(3000, r.travelTimeoutMs || 20000);
-    const maxTempoMs = Math.max(5000, config.maxTempoMs || 120000);
     const maxBolas = Number.isFinite(config.maxBolas) && config.maxBolas > 0 ? Math.floor(config.maxBolas) : null;
 
     let i = 0;
     let phase = 'travel';
     let phaseStart = clock();
-    let targetDeadline = clock() + maxTempoMs;
     let tabTries = 0;
     let throwsTarget = 0;
     let throwsTotal = 0;
@@ -84,7 +82,6 @@
       i += 1;
       phase = 'travel';
       phaseStart = clock();
-      targetDeadline = clock() + maxTempoMs;
       tabTries = 0;
       throwsTarget = 0;
       if (i >= targets.length) finish('fila-completa');
@@ -216,13 +213,6 @@
             phaseStart = agora;
             throwsTarget = 0;
           }
-          // deadline ABSOLUTO por alvo (viagem + caca juntas): sem ele, alvo
-          // disputado (HUD oscila fora do poke-id) reinicia o relogio a cada
-          // entra-e-sai do hunt e a fila nunca avanca.
-          if (agora > targetDeadline) {
-            emitStatus('sem-captura');
-            return nextTarget('skip-tempo');
-          }
           bolas = lerBolas();
           const caido = caidoDoAlvo(t.nome);
           if (caido) {
@@ -231,8 +221,7 @@
               return finish('sem-bolas');
             }
             if (maxBolas !== null && throwsTarget >= maxBolas) {
-              emitStatus('sem-orcamento');
-              return nextTarget('skip-bolas');
+              return finish('limite-arremessos');
             }
             if (PA && PA.clickTarget(caido, doc)) {
               throwsTarget += 1;
@@ -245,13 +234,23 @@
           return schedule();
         }
 
-        if (agora - phaseStart > travelTimeoutMs && phase !== 'travel') {
-          phase = 'travel';
-          phaseStart = agora;
+        // Depois de chegar ao ponto do mapa, espera o HUD confirmar a area.
+        // Nao repete cliques nem troca de alvo se o jogo nao concluir a viagem.
+        if (phase === 'wait-hud') {
+          if (agora - phaseStart > travelTimeoutMs) return finish('falha-chegada');
+          emitStatus('aguardando-chegada');
+          return schedule();
         }
+
+        // O HUD pode oscilar durante uma batalha. Permanece no alvo ate ele
+        // voltar ou o servidor confirmar a captura; nao inicia outra viagem.
+        if (phase === 'hunt') {
+          emitStatus('aguardando-alvo');
+          return schedule();
+        }
+
         if (tabTries > 24) {
-          emitStatus('aba-nao-achada');
-          return nextTarget('skip-marcador');
+          return finish('alvo-nao-localizado');
         }
 
         const marcador = acharMarcador(t.slug);

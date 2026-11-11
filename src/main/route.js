@@ -70,7 +70,6 @@ export class RouteController {
     const config = {
       enabled: true,
       targets: slim,
-      maxTempoMs: opts.maxTempoMs,
       maxBolas: opts.maxBolas,
     };
     this.active.set(slotId, {
