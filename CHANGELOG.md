@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.7] - 2026-11-11
+
+### Melhorado
+
+- A faixa de contas aceita rolagem pela roda do mouse e por arraste, e revela a nova sessão ao criá-la.
+- A barra superior pode ser recolhida para liberar espaço às sessões e expandida pela alça compacta.
+- A grade, o modo Foco e os pop-ups acompanham a altura atual da barra.
+
 ## [0.2.6] - 2026-11-11
 
 ### Melhorado
