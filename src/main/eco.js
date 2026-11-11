@@ -9,9 +9,14 @@
  */
 
 export const ECO_ACTIVE_MS = 200;
+export const GRID_VIEW_FRAME_MS = ECO_ACTIVE_MS;
+export const HIDDEN_VIEW_FRAME_MS = 1000;
 
-export function ecoThrottleMs(enabled) {
-  return enabled === true ? ECO_ACTIVE_MS : 0;
+// This only limits requestAnimationFrame; page timers and network events keep running.
+export function ecoThrottleMs(enabled, visible = true, grid = false) {
+  const userThrottleMs = enabled === true ? ECO_ACTIVE_MS : 0;
+  if (visible === false) return Math.max(userThrottleMs, HIDDEN_VIEW_FRAME_MS);
+  return grid === true ? Math.max(userThrottleMs, GRID_VIEW_FRAME_MS) : userThrottleMs;
 }
 
 export const ECO_INSTALL = `(() => {
@@ -57,6 +62,6 @@ export const ECO_INSTALL = `(() => {
 })()`;
 
 /** Expressao que ajusta o throttle do patch ja instalado (no-op se ausente). */
-export function ecoSetExpr(enabled) {
-  return `(window.__pokeLauncherEco && window.__pokeLauncherEco.set(${ecoThrottleMs(enabled)}), true)`;
+export function ecoSetExpr(enabled, visible = true, grid = false) {
+  return `(window.__pokeLauncherEco && window.__pokeLauncherEco.set(${ecoThrottleMs(enabled, visible, grid)}), true)`;
 }

@@ -11,7 +11,7 @@ import { installSlotExtensions } from './extensions.js';
 import { installDexHook } from './dex-hook.js';
 import { registerAddonPreload, matchesGame } from './addons.js';
 import { LightMode } from './light-mode.js';
-import { ECO_INSTALL, ecoSetExpr } from './eco.js';
+import { ECO_INSTALL, ecoSetExpr, ecoThrottleMs } from './eco.js';
 import { hostAllowed, withTimeout, INJECT_TIMEOUT_MS } from './scripts.js';
 
 const DEFAULT_URL = 'https://pokeidle.io/app';
@@ -92,10 +92,12 @@ export class SlotRegistry {
    * o valor inicial volta a ser aplicado no proximo carregamento.
    */
   async applyEcoPrefs(slot, wc = slot?.view?.webContents) {
-    if (!wc || wc.isDestroyed() || !hostAllowed(wc.getURL?.() ?? '', slot?.url)) return false;
+    if (!wc || wc.isDestroyed() || wc.isLoading?.() || !hostAllowed(wc.getURL?.() ?? '', slot?.url)) return false;
+    const grid = this.viewsVisible && this.focusedSlotId == null && this.slots.length > 1;
+    slot.renderThrottleMs = ecoThrottleMs(slot.eco === true, slot.viewVisible !== false, grid);
     try {
       await withTimeout(
-        wc.executeJavaScript(`${ECO_INSTALL}; ${ecoSetExpr(slot.eco === true)}`, true),
+        wc.executeJavaScript(`${ECO_INSTALL}; ${ecoSetExpr(slot.eco === true, slot.viewVisible !== false, grid)}`, true),
         INJECT_TIMEOUT_MS,
         'eco'
       );
@@ -154,6 +156,8 @@ export class SlotRegistry {
       view,
       popups: [],
       crashes: [],
+      viewVisible: null,
+      renderThrottleMs: null,
       lightMode: false,
       eco: false,
       dexWatch: false,
@@ -290,7 +294,17 @@ export class SlotRegistry {
   syncViewVisibility() {
     for (const slot of this.slots) {
       const visible = isSlotVisible(slot.id, this.focusedSlotId, this.viewsVisible);
-      if (!slot.view.webContents.isDestroyed()) slot.view.setVisible(visible);
+      if (!slot.view.webContents.isDestroyed()) {
+        slot.view.setVisible(visible);
+        // Smaller grid tiles need fewer scene frames; focus restores the selected view.
+        const grid = this.viewsVisible && this.focusedSlotId == null && this.slots.length > 1;
+        const throttleMs = ecoThrottleMs(slot.eco === true, visible, grid);
+        if (slot.viewVisible !== visible || slot.renderThrottleMs !== throttleMs) {
+          slot.viewVisible = visible;
+          slot.renderThrottleMs = throttleMs;
+          this.applyEcoPrefs(slot).catch((err) => console.error(`[${slot.id}] limite de desenho:`, err?.message ?? err));
+        }
+      }
       for (const popup of slot.popups) {
         if (!popup.webContents.isDestroyed()) popup.setVisible(visible);
       }

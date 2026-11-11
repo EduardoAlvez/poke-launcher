@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ECO_INSTALL, ecoSetExpr, ecoThrottleMs, ECO_ACTIVE_MS } from '../src/main/eco.js';
+import { ECO_INSTALL, ecoSetExpr, ecoThrottleMs, ECO_ACTIVE_MS, GRID_VIEW_FRAME_MS, HIDDEN_VIEW_FRAME_MS } from '../src/main/eco.js';
 import { LIGHT_APPLY, LIGHT_RESTORE } from '../src/main/light.js';
 
 function makeEnv() {
@@ -40,8 +40,8 @@ function run(env, code) {
   return fn(env.window, env.setTimeout, env.clearTimeout, env.performance);
 }
 
-function set(env, enabled) {
-  return run(env, ecoSetExpr(enabled));
+function set(env, enabled, visible = true, grid = false) {
+  return run(env, ecoSetExpr(enabled, visible, grid));
 }
 
 function fireAll(env) {
@@ -55,6 +55,39 @@ test('ecoThrottleMs: ligado usa o intervalo ativo, desligado zera', () => {
   assert.equal(ecoThrottleMs(true), ECO_ACTIVE_MS);
   assert.equal(ecoThrottleMs(false), 0);
   assert.equal(ecoThrottleMs('sim'), 0);
+  assert.equal(ecoThrottleMs(false, false), HIDDEN_VIEW_FRAME_MS);
+  assert.equal(ecoThrottleMs(true, false), HIDDEN_VIEW_FRAME_MS);
+  assert.equal(ecoThrottleMs(false, true, true), GRID_VIEW_FRAME_MS);
+  assert.equal(ecoThrottleMs(true, true, true), GRID_VIEW_FRAME_MS);
+  assert.equal(ecoThrottleMs(false, false, true), HIDDEN_VIEW_FRAME_MS);
+});
+
+test('view oculta limita apenas o rAF e restaura quando volta a aparecer', () => {
+  const env = makeEnv();
+  install(env);
+  set(env, false, false);
+  env.window.requestAnimationFrame(() => {});
+  assert.equal([...env.timers.values()][0].ms, HIDDEN_VIEW_FRAME_MS);
+
+  fireAll(env);
+  set(env, false, true);
+  env.window.requestAnimationFrame(() => {});
+  assert.equal(env.timers.size, 0);
+  assert.equal(env.frames.length, 1);
+});
+
+test('grade com varias sessões limita a cena, mas o foco restaura a taxa normal', () => {
+  const env = makeEnv();
+  install(env);
+  set(env, false, true, true);
+  env.window.requestAnimationFrame(() => {});
+  assert.equal([...env.timers.values()][0].ms, GRID_VIEW_FRAME_MS);
+
+  fireAll(env);
+  set(env, false, true, false);
+  env.window.requestAnimationFrame(() => {});
+  assert.equal(env.timers.size, 0);
+  assert.equal(env.frames.length, 1);
 });
 
 test('patch do eco instala uma vez e some na segunda', () => {

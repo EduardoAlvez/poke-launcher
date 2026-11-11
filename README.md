@@ -22,9 +22,11 @@ Baixe o instalador na página de releases:
   (`persist:slot-N`). Adicionar e remover pela toolbar, renomear com duplo clique no nome.
 - **Menu do chip** (clique direito): silenciar a sessão, zoom de 75% a 150% e **reler login**
   (limpa cookies e armazenamento só daquela conta; as outras sessões não mudam).
-- **Grade ajustável**: 1, 2 ou 3 colunas (o padrão é 2).
+- **Grade ajustável**: 1, 2 ou 3 colunas (o padrão é 2); com várias sessões visíveis, o desenho da cena
+  fica limitado a 5 quadros por segundo. No modo Foco, a sessão selecionada volta à taxa normal.
 - **Modo foco**: amplia uma sessão para ocupar a área de jogo abaixo da barra do launcher; as outras
-  continuam em execução. Use **Sair do foco** ou `Esc` para voltar à grade, que preserva o número de colunas.
+  continuam em execução com o desenho limitado a 1 quadro por segundo enquanto ocultas. Use **Sair do foco**
+  ou `Esc` para voltar à grade, que preserva o número de colunas.
 - **Bandeja**: fecha para a bandeja com `X`; menu com Abrir, Silenciar, Parar automações e Encerrar.
 - **Notificações nativas** por evento do jogo (captura, poucas bolas, boss, ovo), com cooldown,
   limite de taxa e botão de silenciar na bandeja.
