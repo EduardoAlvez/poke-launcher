@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.6] - 2026-11-11
+
+### Melhorado
+
+- Reduz o desenho da cena a 5 FPS na grade com várias sessões e a 1 FPS nas sessões ocultas, preservando timers e rede; o modo Foco restaura a taxa normal da sessão selecionada.
+
 ## [0.2.5] - 2026-11-11
 
 ### Adicionado
