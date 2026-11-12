@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.8] - 2026-11-12
+
+### Corrigido
+
+- Rota de captura reconhece a chegada pela área atual e funciona com o mapa em layout mobile e em modo Lista.
+- A lista mobile de Pokémon caídos abre automaticamente para a rota e a automação lançarem bolas em sessões estreitas.
+- A rota mantém cada alvo até a confirmação da captura e restaura a preferência de Economia quando aplicável.
+
+### Melhorado
+
+- Falhas e encerramentos automáticos da rota são registrados e apresentados com estado identificável.
+
 ## [0.2.7] - 2026-11-11
 
 ### Melhorado
