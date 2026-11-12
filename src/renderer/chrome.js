@@ -1007,6 +1007,8 @@ let routeWasRunning = false;
 let lastBalls = null;
 const ROUTE_STATE_LABELS = {
   partindo: 'iniciando',
+  'saindo-economia': 'saindo do Modo Economia',
+  'modo-economia': 'aguardando saída do Modo Economia',
   'procurando-regiao': 'procurando região',
   'abrindo-mapa': 'abrindo mapa',
   viajando: 'viajando para o local',

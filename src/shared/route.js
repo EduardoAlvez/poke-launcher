@@ -5,10 +5,12 @@
  * captura vem do MAIN (que ve o delta `dexMud` pela ponte do dex-hook) pelo
  * comando `advance`.
  *
- * Estados por alvo: travel (abrir mapa/achar marcador) -> wait-hud (chegou?)
- * -> hunt (arremessar ou aguardar VIP ate o main confirmar) -> proximo.
+ * Estados por alvo: travel (abrir mapa/achar marcador) -> ficha (no movel o
+ * toque no marcador so abre a ficha; "Cacar aqui" e quem viaja) -> wait-hud
+ * (chegou?) -> hunt (arremessar ou aguardar VIP ate o main confirmar) ->
+ * proximo.
  * Sem caido na area o laço espera (spawn e do jogo). Falhas de viagem param
- * no alvo atual; somente captura confirmada ou marcador capturado avanca.
+ * no alvo atual; somente captura confirmada avanca.
  */
 (function (root) {
   const PA = root.PokeAutomation; // reusa isVisible/clickTarget/findFirst do motor
@@ -26,9 +28,10 @@
     const travelTimeoutMs = Math.max(3000, r.travelTimeoutMs || 20000);
     const maxBolas = Number.isFinite(config.maxBolas) && config.maxBolas > 0 ? Math.floor(config.maxBolas) : null;
     const manualCapture = config.manualCapture === true;
+    const gerenciaEconomia = config.gerenciaEconomia === true;
 
     let i = 0;
-    let phase = 'travel';
+    let phase = config.currentHuntSlug === targets[0]?.slug ? 'hunt' : 'travel';
     let phaseStart = clock();
     let tabTries = 0;
     let throwsTarget = 0;
@@ -38,6 +41,11 @@
     let timer = null;
     let lastEmit = '';
     let bolas = null; // lido do DOM em tempo real: o espelho estado.balls NAO chega nos deltas
+    let economyExited = false;
+    let modoTrocou = false; // a rota ligou o modo Mapa (o usuario estava em Lista)
+    let modoTries = 0;
+    let marcadorAlvo = null; // o marcador tocado: o re-clique da porta de troca usa
+    let fichaInicio = 0; // entrada na fase ficha: o orcamento de 15 s nao zera nos vaivens
 
     const target = () => targets[i] || null;
 
@@ -79,10 +87,10 @@
       });
     };
 
-    const nextTarget = (state) => {
+    const nextTarget = (state, currentHuntSlug = null) => {
       emitStatus(state);
       i += 1;
-      phase = 'travel';
+      phase = target() && currentHuntSlug && currentHuntSlug === target().slug ? 'hunt' : 'travel';
       phaseStart = clock();
       tabTries = 0;
       throwsTarget = 0;
@@ -95,6 +103,22 @@
       stopped = true;
       if (timer) win.clearTimeout(timer);
       timer = null;
+      if (modoTrocou) {
+        // Devolve o modo Lista do usuario: o clique grava `mapaModo` no
+        // localStorage do jogo (e so visivel com o mapa aberto); fechado, o
+        // localStorage garante a volta na proxima abertura.
+        if (mapaAberto()) trocarModoMapa(true);
+        try {
+          win.localStorage && win.localStorage.setItem('mapaModo', 'lista');
+        } catch {
+          /* modo privado */
+        }
+      }
+      if (economyExited && reason !== 'reconfigurado' && !gerenciaEconomia && pack?.economyEnterSelector && PA) {
+        const enter = PA.findFirst(doc, [pack.economyEnterSelector]);
+        if (enter) PA.clickTarget(enter, doc);
+      }
+      economyExited = false;
       emit?.({
         type: 'route-status',
         state: reason,
@@ -134,11 +158,23 @@
     const abrirMapa = () => {
       const label = r.mapLabel || 'Mapa';
       try {
-        for (const b of doc.querySelectorAll('button,[role=button]')) {
-          if (textOf(b) === label && (!PA || PA.isClickable(b, doc))) {
-            b.click();
-            return true;
+        const bts = [...doc.querySelectorAll('button,[role=button]')].filter((b) => textOf(b) === label);
+        // Janela estreita = layout movel do jogo: o Mapa mora na gaveta
+        // 'Menu' (`.m-pane[data-aba="menu"]`), fechada a cada carga. Botao
+        // existe mas invisivel -> abre a gaveta e deixa o clique do Mapa
+        // para o proximo tick, quando a pane termina de subir.
+        const bt = bts.find((b) => !PA || PA.isClickable(b, doc)) || bts[0];
+        if (bt && (!PA || PA.isClickable(bt, doc))) {
+          bt.click();
+          return true;
+        }
+        if (bt) {
+          const gaveta = doc.querySelector(r.menuAba || '#m-nav button[data-aba="menu"]');
+          if (gaveta && (!PA || PA.isClickable(gaveta, doc))) {
+            gaveta.click();
+            emitStatus('abrindo-gaveta');
           }
+          return false;
         }
       } catch {
         /* DOM mudou: o proximo tick tenta de novo */
@@ -158,7 +194,38 @@
       }
     };
 
-    const marcadorCapturado = (el) => /(?:^|\s)capturado(?:\s|$)/.test(String(el?.className || ''));
+    // O Mapa do jogo tem dois desenhos: modo Mapa (o mundi com marcadores
+    // `button.marcador[data-slug]`) e modo Lista (linhas de texto, SEM
+    // marcador nenhum — confirmado no fogo real 2026-11-12: conta em Lista
+    // deixava a maquina num laco de aba ate o tabTries estourar com
+    // 'alvo-nao-localizado'). O modo vem do localStorage do jogo
+    // (`mapaModo`), conta por conta: um slot em Lista bastava para a rota
+    // parar.
+    const mapaEmLista = () => {
+      try {
+        // o pack pode ser antigo (sem as chaves de modo): os padroes valem sozinhos
+        const p = doc.querySelector(r.mapaPrincipal || '#mapa-principal');
+        return Boolean(p && p.classList.contains(r.modoListaClasse || 'modo-lista'));
+      } catch {
+        return false;
+      }
+    };
+
+    const trocarModoMapa = (paraLista) => {
+      const sel = paraLista
+        ? r.btModoLista || '.mapa-modo-bt[data-modo="lista"]'
+        : r.btModoMapa || '.mapa-modo-bt[data-modo="mapa"]';
+      try {
+        const bt = doc.querySelector(sel);
+        if (bt && (!PA || PA.isClickable(bt, doc))) {
+          bt.click();
+          return true;
+        }
+      } catch {
+        /* DOM mudou: o proximo tick tenta de novo */
+      }
+      return false;
+    };
 
     const trocarAba = () => {
       // SEMPRE conta a tentativa, inclusive quando nao ha aba clicavel: e
@@ -172,17 +239,6 @@
         const prox = tabs[(Math.max(atual, 0) + 1) % tabs.length];
         prox.click();
         return true;
-      } catch {
-        return false;
-      }
-    };
-
-    const hudEhDoAlvo = (pokeId) => {
-      try {
-        const hud = doc.querySelector(r.hud || '#hud-hunt');
-        if (!hud) return false;
-        const attr = r.hudIdAttr || 'pokeId';
-        return Number(hud.dataset[attr]) === Number(pokeId);
       } catch {
         return false;
       }
@@ -209,12 +265,18 @@
         if (!t) return finish('fila-completa');
         const agora = clock();
 
-        if (hudEhDoAlvo(t.pokeId)) {
-          if (phase !== 'hunt') {
-            phase = 'hunt';
-            phaseStart = agora;
-            throwsTarget = 0;
+        if (PA?.isEconomy?.(doc, pack)) {
+          const exit = !gerenciaEconomia && pack?.economyExitSelector && PA.findFirst(doc, [pack.economyExitSelector]);
+          if (exit && PA.clickTarget(exit, doc)) {
+            economyExited = true;
+            emitStatus('saindo-economia');
+          } else {
+            emitStatus('modo-economia');
           }
+          return schedule();
+        }
+
+        if (phase === 'hunt') {
           if (manualCapture) {
             emitStatus('aguardando-vip');
           } else {
@@ -234,24 +296,55 @@
               }
               emitStatus('arremessando');
             } else {
+              PA?.openMobileCapturePanel?.(doc, pack);
               emitStatus('esperando-caido');
             }
           }
           return schedule();
         }
 
-        // Depois de chegar ao ponto do mapa, espera o HUD confirmar a area.
-        // Nao repete cliques nem troca de alvo se o jogo nao concluir a viagem.
+        // A chegada e confirmada pelo huntSlug recebido no processo principal.
+        // Nao repete cliques nem troca de alvo enquanto o servidor nao confirmar.
         if (phase === 'wait-hud') {
           if (agora - phaseStart > travelTimeoutMs) return finish('falha-chegada');
+          if (mapaAberto()) {
+            // o modal ainda esta em pe: a viagem NAO aconteceu — a porta de
+            // troca de hunt recusou o clique da ficha. Volta para a ficha,
+            // que re-clica o botao (movel) ou o marcador (desktop).
+            phase = 'ficha';
+            emitStatus('ficha-hunt');
+            return schedule();
+          }
           emitStatus('aguardando-chegada');
           return schedule();
         }
 
-        // O HUD pode oscilar durante uma batalha. Permanece no alvo ate ele
-        // voltar ou o servidor confirmar a captura; nao inicia outra viagem.
-        if (phase === 'hunt') {
-          emitStatus('aguardando-alvo');
+        if (phase === 'ficha') {
+          if (!mapaAberto()) {
+            // desktop: o clique no marcador ja viajou — o jogo fecha o modal
+            phase = 'wait-hud';
+            phaseStart = agora;
+            emitStatus('viajando');
+            return schedule();
+          }
+          const btCacar = doc.querySelector(r.btCacar || '.ha-cacar');
+          // isClickable antes do clique: o botao nasce `disabled` quando a hunt
+          // esta travada, e o clickTarget do motor clica sem conferir.
+          if (btCacar && (!PA || (PA.isClickable(btCacar, doc) && PA.clickTarget(btCacar, doc)))) {
+            // movel: a ficha abriu com o toque no marcador; este botao e quem viaja
+            phase = 'wait-hud';
+            phaseStart = agora;
+            emitStatus('viajando');
+            return schedule();
+          }
+          // Porta de troca de hunt: ao entrar numa hunt o servidor impoe uma
+          // espera (~10 s) e a tela RECUSA a troca com toast, sem viajar e
+          // sem fechar o mapa. Re-clique a cada tick (marcador no desktop,
+          // onde o clique e a viagem; botao da ficha no movel, que acabou de
+          // ser recusado) ate a porta abrir — 15 s cobrem a porta com folga.
+          if (agora - fichaInicio > 15000) return finish('falha-ficha');
+          if (!btCacar && marcadorAlvo && PA) PA.clickTarget(marcadorAlvo, doc);
+          emitStatus('ficha-hunt');
           return schedule();
         }
 
@@ -261,14 +354,16 @@
 
         const marcador = acharMarcador(t.slug);
         if (marcador) {
-          // classe do proprio jogo: a especie ja esta na dex — nao gasta viagem
-          // nem bolas (complementa o baseline do main, que ve o delta real)
-          if (marcadorCapturado(marcador)) return nextTarget('skip-capturado');
           if (PA && PA.clickTarget(marcador, doc)) {
-            phase = 'wait-hud';
+            // O toque no marcador so VIAJA no desktop; no movel ele abre a
+            // ficha e quem viaja e o botao "Cacar aqui" dela (a ficha so
+            // existe no movel). A fase 'ficha' decide no tick seguinte.
+            marcadorAlvo = marcador;
+            fichaInicio = agora;
+            phase = 'ficha';
             phaseStart = agora;
             tabTries = 0;
-            emitStatus('viajando');
+            emitStatus('ficha-hunt');
           }
           return schedule();
         }
@@ -278,6 +373,15 @@
           emitStatus('abrindo-mapa');
           return schedule();
         }
+        if (mapaEmLista()) {
+          modoTrocou = true;
+          modoTries += 1; // conta mesmo com clique "bem-sucedido": classe que nao sai tambem trava
+          trocarModoMapa(false);
+          if (modoTries > 8) return finish('falha-modo-mapa');
+          emitStatus('trocando-modo-mapa');
+          return schedule(); // os marcadores so existem no tick seguinte
+        }
+        modoTries = 0;
         trocarAba();
         emitStatus('procurando-regiao');
         return schedule();
@@ -293,12 +397,25 @@
        * O main confirmou a captura do alvo atual por delta real da dex
        * (`dexMud` com c>0) — unica fonte honesta de "capturou".
        */
-      advance: () => {
+      arrive: (slug) => {
+        if (stopped) return false;
+        const t = target();
+        if (!t || t.slug !== slug) return false;
+        if (phase === 'hunt') return true;
+        phase = 'hunt';
+        phaseStart = clock();
+        tabTries = 0;
+        throwsTarget = 0;
+        emitStatus(manualCapture ? 'aguardando-vip' : 'esperando-caido');
+        schedule();
+        return true;
+      },
+      advance: (currentHuntSlug = null) => {
         if (stopped) return false;
         const t = target();
         if (!t) return false;
         captured += 1;
-        nextTarget('capturado');
+        nextTarget('capturado', currentHuntSlug);
         return true;
       },
       isRunning: () => !stopped,

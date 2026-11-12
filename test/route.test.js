@@ -66,6 +66,7 @@ test('start monta fila do fixture, envia route:config enxuto e vira running', as
   assert.equal(slotId, 'slot-1');
   assert.equal(channel, 'route:config');
   assert.equal(payload.config.enabled, true);
+  assert.equal(payload.config.currentHuntSlug, 'magma_magcargo');
   assert.deepEqual(Object.keys(payload.config.targets[0]).sort(), ['nome', 'pokeId', 'slug']);
   assert.equal(controller.isActiveRunning('slot-1'), true);
   const pub = controller.publicState('slot-1');
@@ -85,7 +86,7 @@ test('confirmacao so vem do delta real da dex; captura avanca e re-baselineia', 
   assert.equal(sent.length, 0);
   st.dex[String(pokeId)] = { k: 1, c: 1, sv: 0, sc: 0 };
   controller.onHuntUpdate('slot-1', st);
-  assert.deepEqual(sent[0], ['slot-1', 'route:cmd', { action: 'advance' }]);
+  assert.deepEqual(sent[0], ['slot-1', 'route:cmd', { action: 'advance', currentHuntSlug: 'magma_magcargo' }]);
   assert.equal(controller.publicState('slot-1').captured, 1);
   sent.length = 0;
   controller.onHuntUpdate('slot-1', st); // c igual ao baseline: nao avanca de novo
@@ -102,7 +103,7 @@ test('a captura confirmada no frame real (estado aninhado) avanca a fila', async
   // Frame como o servidor manda: o parcial fica DENTRO de `estado`.
   applyDelta(st, { t: 'estado', estado: { dexMud: { 10: { k: 1, c: 1 } } } });
   controller.onHuntUpdate('slot-1', st);
-  assert.deepEqual(sent[0], ['slot-1', 'route:cmd', { action: 'advance' }]);
+  assert.deepEqual(sent[0], ['slot-1', 'route:cmd', { action: 'advance', currentHuntSlug: 'magma_magcargo' }]);
 });
 
 test('evento de captura confirma na hora e nao duplica quando a dex tambem chega', async () => {
@@ -112,7 +113,7 @@ test('evento de captura confirma na hora e nao duplica quando a dex tambem chega
   sent.length = 0;
   // Evento real do servidor: { k:'capturado', pokemon:{ speciesId } }.
   controller.onCapture('slot-1', { speciesId: 10, nome: 'Caterpie' });
-  assert.deepEqual(sent[0], ['slot-1', 'route:cmd', { action: 'advance' }]);
+  assert.deepEqual(sent[0], ['slot-1', 'route:cmd', { action: 'advance', currentHuntSlug: 'magma_magcargo' }]);
   assert.equal(controller.publicState('slot-1').captured, 1);
   // O delta da dex da MESMA captura nao pode pular outro alvo.
   sent.length = 0;
@@ -122,6 +123,15 @@ test('evento de captura confirma na hora e nao duplica quando a dex tambem chega
   // Captura de outra especie nao mexe na fila.
   controller.onCapture('slot-1', { speciesId: 999 });
   assert.equal(sent.length, 0);
+});
+
+test('huntSlug confirma chegada na area sem depender do ID principal do HUD', async () => {
+  const st = estadoPronto();
+  const { controller, sent } = controllerFake(st);
+  await controller.start('slot-1', { ackRisk: true, maxAlvos: 1, levelCap: true });
+  st.huntSlug = 'caterpie';
+  controller.onHuntUpdate('slot-1', st);
+  assert.deepEqual(sent[sent.length - 1], ['slot-1', 'route:cmd', { action: 'arrived', slug: 'caterpie' }]);
 });
 
 test('bolas zeradas param a rota; texto de pare chega a pagina', async () => {
@@ -176,8 +186,14 @@ const now = () => nowMs;
 function fakeWin({ stepMs = 0 } = {}) {
   const timers = [];
   let seq = 0;
+  const ls = new Map();
   return {
     timers,
+    localStorage: {
+      getItem: (k) => (ls.has(k) ? ls.get(k) : null),
+      setItem: (k, v) => ls.set(k, String(v)),
+      _dump: () => Object.fromEntries(ls),
+    },
     setTimeout: (fn) => {
       const id = ++seq;
       timers.push({ id, fn });
@@ -211,13 +227,38 @@ function markerEl(nome) {
   return el;
 }
 
-function fakeDoc({ tabs, markersByTab, hudPokeId, caidos, mapaAberto: aberto = true, fechaAoViajar = false, mapaNaoAbre = false }) {
-  const mapaBtn = { textContent: 'Mapa', disabled: false, _clicks: 0 };
+function fakeDoc({ tabs, markersByTab, hudPokeId, caidos, mapaAberto: aberto = true, mapaNaoAbre = false, modoLista = false, gavetaFechada = false, fichaMovel = false, portaDeTroca = 0 }) {
+  const mapaBtn = { textContent: 'Mapa', disabled: false, _clicks: 0, hidden: gavetaFechada };
+  // layout movel: o Mapa mora na gaveta 'Menu'; o clique nela destapa o botao
+  const gaveta = { textContent: 'Menu', dataset: { aba: 'menu' }, hidden: false, _clicks: 0 };
+  gaveta.click = () => {
+    gaveta._clicks += 1;
+    mapaBtn.hidden = false;
+  };
   mapaBtn.click = () => {
     mapaBtn._clicks += 1;
     if (!mapaNaoAbre) aberto = true;
   };
   let abaAtual = tabs[0];
+  let emLista = modoLista;
+  const mapaModoBts = {
+    mapa: { className: 'mapa-modo-bt', dataset: { modo: 'mapa' }, _clicks: 0 },
+    lista: { className: 'mapa-modo-bt', dataset: { modo: 'lista' }, _clicks: 0 },
+  };
+  mapaModoBts.mapa.click = () => {
+    mapaModoBts.mapa._clicks += 1;
+    emLista = false; // o jogo real: trocarModoMapa('mapa') tira o modo-lista
+  };
+  mapaModoBts.lista.click = () => {
+    mapaModoBts.lista._clicks += 1;
+    emLista = true;
+  };
+  const principal = {
+    className: emLista ? 'mapa-principal modo-lista' : 'mapa-principal',
+    classList: {
+      contains: (c) => emLista && c === 'modo-lista',
+    },
+  };
   const abas = tabs.map((t) => {
     const el = { dataset: { regiao: t }, className: '', _clicks: 0 };
     el.click = () => {
@@ -234,6 +275,32 @@ function fakeDoc({ tabs, markersByTab, hudPokeId, caidos, mapaAberto: aberto = t
         if (markersByTab[slug].capturado) m.className += ' capturado';
         markers[`${t}|${slug}`] = m;
       }
+  // O jogo real fecha o modal ao viajar (bug do fogo real 2026-11-10). No
+  // movel o toque no marcador so abre a ficha: "Cacar aqui" (.ha-cacar) e
+  // quem viaja — e ele que fecha o modal. A porta de troca de hunt recusa
+  // os primeiros cliques (o jogo so mostra toast; nem mapa fecha nem ficha).
+  let fichaVisivel = false;
+  let portaTentativas = portaDeTroca;
+  const haCacar = { className: 'ha-cacar', disabled: false, _clicks: 0 };
+  haCacar.click = () => {
+    if (portaTentativas > 0) portaTentativas -= 1;
+    else {
+      aberto = false;
+      fichaVisivel = false;
+    }
+    haCacar._clicks += 1;
+  };
+  for (const mk of Object.values(markers)) {
+    const antes = mk.click;
+    mk.click = () => {
+      // no movel o toque no marcador so abre a ficha: a porta de troca nao o
+      // trava — quem cai na porta e o botao da ficha
+      if (!fichaMovel && portaTentativas > 0) portaTentativas -= 1;
+      else if (fichaMovel) fichaVisivel = true;
+      else aberto = false;
+      antes();
+    };
+  }
   const hud = { dataset: { pokeId: hudPokeId } };
   const bola = { className: 'caidos-bola on' };
   bola.getAttribute = () => `Ultra Ball — você tem ${caidos?.bolas ?? 1547}`;
@@ -254,9 +321,19 @@ function fakeDoc({ tabs, markersByTab, hudPokeId, caidos, mapaAberto: aberto = t
         return el || null;
       }
       if (sel === '#hud-hunt') return hud;
+      if (sel === '#m-nav button[data-aba="menu"]') return gaveta;
+      if (sel === '#mapa-principal') return principal;
+      if (sel === '.ha-cacar') return fichaVisivel ? haCacar : null;
+      const modo = /\.mapa-modo-bt\[data-modo="([^"]+)"\]/.exec(sel);
+      if (modo) {
+        const el = mapaModoBts[modo[1]] ?? null;
+        if (el) el.hidden = !aberto;
+        return el;
+      }
       if (sel === '#caidos-bolas .caidos-bola.on') return bola;
       const m = /marcador\[data-slug="([^"]+)"\]/.exec(sel);
       if (m) {
+        if (emLista) return null; // modo Lista real: nenhum marcador no DOM
         const el = markers[`${abaAtual}|${m[1]}`] ?? null;
         if (el) el.hidden = !aberto; // jogo fecha o mapa mas deixa o DOM montado
         return el;
@@ -264,23 +341,13 @@ function fakeDoc({ tabs, markersByTab, hudPokeId, caidos, mapaAberto: aberto = t
       return null;
     },
     querySelectorAll: (sel) => {
-      if (sel === 'button,[role=button]') return [mapaBtn];
+      if (sel === 'button,[role=button]') return [mapaBtn, gaveta];
       if (sel === '.mapa-reg-bt') return abas.map((a) => ((a.hidden = !aberto), a));
       if (sel === '#caidos-lista .caido') return caidos?.present ? [caido] : [];
       return [];
     },
-    _probe: { mapaBtn, abas, markers, hud, caido, bola, aberto: () => aberto },
+    _probe: { mapaBtn, gaveta, abas, markers, hud, caido, bola, aberto: () => aberto, principal, mapaModoBts, emLista: () => emLista, haCacar, ficha: () => fichaVisivel },
   };
-  if (fechaAoViajar) {
-    // o jogo fecha o mapa ao escolher um destino: a maquina precisa reabrir
-    for (const mk of Object.values(markers)) {
-      const antes = mk.click;
-      mk.click = () => {
-        aberto = false;
-        antes();
-      };
-    }
-  }
   return doc;
 }
 
@@ -293,6 +360,12 @@ const PACK = {
     hudIdAttr: 'pokeId',
     caidoList: '#caidos-lista .caido',
     caidoNome: '.caido-quem',
+    menuAba: '#m-nav button[data-aba="menu"]',
+    btCacar: '.ha-cacar',
+    mapaPrincipal: '#mapa-principal',
+    modoListaClasse: 'modo-lista',
+    btModoMapa: '.mapa-modo-bt[data-modo="mapa"]',
+    btModoLista: '.mapa-modo-bt[data-modo="lista"]',
   },
 };
 
@@ -315,13 +388,14 @@ test('maquina: aba errada -> troca, viaja, arremessa e para quando confirmam', (
   });
   const states = () => emits.filter((e) => e.type === 'route-status').map((e) => e.state);
   win.flush(); // kanto: sem marcador -> procura regiao
-  win.flush(); // outland: marcador -> viajando
-  assert.deepEqual(states(), ['partindo', 'procurando-regiao', 'viajando']);
-  doc._probe.hud.dataset.pokeId = '2053';
+  win.flush(); // outland: marcador -> ficha
+  win.flush(); // mapa fechou (o jogo viaja no clique) -> viajando
+  assert.deepEqual(states(), ['partindo', 'procurando-regiao', 'ficha-hunt', 'viajando']);
+  assert.equal(api.arrive('magma_magcargo'), true);
   win.flush(); // hunt: arremessa
   assert.ok(states().includes('arremessando'));
   assert.equal(doc._probe.caido._clicks, 1);
-  assert.equal(api.advance(), true); // main confirmou por dexMud
+  assert.equal(api.advance('magma_magcargo'), true); // main confirmou por dexMud
   const ultimo = emits[emits.length - 1];
   assert.equal(ultimo.state, 'fila-completa');
   assert.equal(ultimo.running, false);
@@ -338,7 +412,7 @@ test('maquina: sem mapa aberto, clica o botao Mapa primeiro e so depois viaja', 
   });
   const win = fakeWin();
   const emits = [];
-  globalThis.PokeRoute.installRoute({
+  const api = globalThis.PokeRoute.installRoute({
     config: { enabled: true, targets: [{ pokeId: 10, slug: 'caterpie', nome: 'Caterpie' }] },
     pack: PACK,
     emit: (e) => emits.push(e),
@@ -347,8 +421,9 @@ test('maquina: sem mapa aberto, clica o botao Mapa primeiro e so depois viaja', 
     now,
   });
   win.flush(); // sem mapa -> abre
-  win.flush(); // marcador achado -> viajando
-  doc._probe.hud.dataset.pokeId = '10';
+  win.flush(); // marcador achado -> ficha
+  win.flush(); // mapa fechou -> viajando
+  assert.equal(api.arrive('caterpie'), true);
   win.flush(); // hunt -> arremessa
   const states = emits.map((e) => e.state);
   assert.ok(states.includes('abrindo-mapa'), states.join(','));
@@ -356,6 +431,243 @@ test('maquina: sem mapa aberto, clica o botao Mapa primeiro e so depois viaja', 
   assert.ok(states.includes('arremessando'));
   assert.equal(doc._probe.mapaBtn._clicks, 1);
   assert.equal(doc._probe.caido._clicks, 1);
+});
+
+test('maquina: mapa em modo Lista nao tem marcador — troca para o modo Mapa antes de viajar', () => {
+  const doc = fakeDoc({
+    tabs: ['kanto'],
+    markersByTab: { caterpie: { tab: 'kanto' } },
+    hudPokeId: '99',
+    caidos: { nome: 'Caterpie Nv1', present: true },
+    modoLista: true,
+  });
+  const win = fakeWin();
+  const emits = [];
+  const api = globalThis.PokeRoute.installRoute({
+    config: { enabled: true, targets: [{ pokeId: 10, slug: 'caterpie', nome: 'Caterpie' }] },
+    pack: PACK,
+    emit: (e) => emits.push(e),
+    doc,
+    win,
+    now,
+  });
+  const states = () => emits.filter((e) => e.type === 'route-status').map((e) => e.state);
+  win.flush(); // mapa em Lista: troca o modo em vez de procurar marcador/aba
+  assert.ok(states().includes('trocando-modo-mapa'), states().join(','));
+  assert.equal(doc._probe.mapaModoBts.mapa._clicks, 1);
+  assert.equal(doc._probe.emLista(), false);
+  win.flush(); // trocando-modo-mapa
+  win.flush(); // marcador achado -> ficha
+  win.flush(); // mapa fechou -> viajando
+  assert.ok(states().includes('viajando'), states().join(','));
+  assert.equal(api.arrive('caterpie'), true);
+  win.flush(); // hunt: arremessa
+  assert.ok(states().includes('arremessando'), states().join(','));
+  assert.equal(doc._probe.caido._clicks, 1);
+});
+
+test('maquina: layout movel — o Mapa mora na gaveta, abre o Menu antes', () => {
+  const doc = fakeDoc({
+    tabs: ['kanto'],
+    markersByTab: { caterpie: { tab: 'kanto' } },
+    hudPokeId: '99',
+    caidos: { nome: 'Caterpie Nv1', present: true },
+    mapaAberto: false,
+    gavetaFechada: true,
+  });
+  const win = fakeWin();
+  const emits = [];
+  const api = globalThis.PokeRoute.installRoute({
+    config: { enabled: true, targets: [{ pokeId: 10, slug: 'caterpie', nome: 'Caterpie' }] },
+    pack: PACK,
+    emit: (e) => emits.push(e),
+    doc,
+    win,
+    now,
+  });
+  const states = () => emits.filter((e) => e.type === 'route-status').map((e) => e.state);
+  win.flush(); // gaveta fechada: clica o Menu, o Mapa ainda esta escondido
+  assert.ok(states().includes('abrindo-gaveta'), states().join(','));
+  assert.equal(doc._probe.gaveta._clicks, 1);
+  assert.equal(doc._probe.mapaBtn._clicks, 0);
+  win.flush(); // gaveta aberta: agora clica o Mapa
+  assert.equal(doc._probe.mapaBtn._clicks, 1);
+  win.flush(); // marcador visivel -> ficha
+  win.flush(); // mapa fechou -> viajando
+  assert.ok(states().includes('viajando'), states().join(','));
+  assert.equal(api.arrive('caterpie'), true);
+});
+
+test('maquina: fim da rota devolve o modo Lista do usuario', () => {
+  const doc = fakeDoc({
+    tabs: ['kanto'],
+    markersByTab: { caterpie: { tab: 'kanto' } },
+    hudPokeId: '99',
+    caidos: { nome: 'Caterpie Nv1', present: true },
+    modoLista: true,
+  });
+  const win = fakeWin();
+  const emits = [];
+  const api = globalThis.PokeRoute.installRoute({
+    config: { enabled: true, targets: [{ pokeId: 10, slug: 'caterpie', nome: 'Caterpie' }] },
+    pack: PACK,
+    emit: (e) => emits.push(e),
+    doc,
+    win,
+    now,
+  });
+  win.flush(); // trocando-modo-mapa
+  win.flush(); // marcador -> ficha
+  win.flush(); // mapa fechou -> viajando
+  assert.equal(api.arrive('caterpie'), true);
+  assert.equal(api.advance('caterpie'), true); // fila-completa -> finish
+  const ultimo = emits[emits.length - 1];
+  assert.equal(ultimo.state, 'fila-completa');
+  // o mapa ja fechou ao viajar: a volta do modo Lista fica no localStorage
+  assert.equal(win.localStorage.getItem('mapaModo'), 'lista', 'preferencia devolvida no localStorage');
+  assert.equal(doc._probe.mapaModoBts.lista._clicks, 0, 'mapa fechado: nada a clicar');
+});
+
+test('maquina: chave de modo que nunca sai e fuga, nao laco', () => {
+  const doc = fakeDoc({
+    tabs: ['kanto'],
+    markersByTab: {},
+    hudPokeId: '99',
+    caidos: { present: false },
+    modoLista: true,
+  });
+  // o clique nao tira o modo-lista (o jogo ignoraria a chave)
+  doc._probe.mapaModoBts.mapa.click = () => {
+    doc._probe.mapaModoBts.mapa._clicks += 1;
+  };
+  const win = fakeWin();
+  const emits = [];
+  const api = globalThis.PokeRoute.installRoute({
+    config: { enabled: true, targets: [{ pokeId: 10, slug: 'caterpie', nome: 'Caterpie' }] },
+    pack: PACK,
+    emit: (e) => emits.push(e),
+    doc,
+    win,
+    now,
+  });
+  for (let n = 0; n < 40 && api.isRunning(); n += 1) win.flush();
+  const states = emits.map((e) => e.state);
+  assert.ok(states.includes('falha-modo-mapa'), states.join(','));
+  assert.equal(api.isRunning(), false);
+});
+
+test('maquina: movel — toque no marcador abre a ficha; "Cacar aqui" e quem viaja', () => {
+  const doc = fakeDoc({
+    tabs: ['kanto'],
+    markersByTab: { caterpie: { tab: 'kanto' } },
+    hudPokeId: '99',
+    caidos: { nome: 'Caterpie Nv1', present: true },
+    fichaMovel: true,
+  });
+  const win = fakeWin();
+  const emits = [];
+  const api = globalThis.PokeRoute.installRoute({
+    config: { enabled: true, targets: [{ pokeId: 10, slug: 'caterpie', nome: 'Caterpie' }] },
+    pack: PACK,
+    emit: (e) => emits.push(e),
+    doc,
+    win,
+    now,
+  });
+  const states = () => emits.filter((e) => e.type === 'route-status').map((e) => e.state);
+  win.flush(); // marcador -> ficha-hunt (o mapa fica aberto)
+  assert.ok(states().includes('ficha-hunt'), states().join(','));
+  assert.equal(doc._probe.aberto(), true, 'o toque no marcador so abriu a ficha');
+  win.flush(); // "Cacar aqui" -> viajando (o jogo fecha o modal)
+  assert.ok(states().includes('viajando'), states().join(','));
+  assert.equal(doc._probe.haCacar._clicks, 1);
+  assert.equal(doc._probe.aberto(), false);
+  assert.equal(api.arrive('caterpie'), true);
+  win.flush(); // hunt: arremessa
+  assert.ok(states().includes('arremessando'), states().join(','));
+  assert.equal(doc._probe.caido._clicks, 1);
+});
+
+test('maquina: ficha sem botao viajavel para com falha-ficha, nao laco', () => {
+  nowMs = 1000;
+  const doc = fakeDoc({
+    tabs: ['kanto'],
+    markersByTab: { caterpie: { tab: 'kanto' } },
+    hudPokeId: '99',
+    caidos: { present: false },
+    fichaMovel: true,
+  });
+  doc._probe.haCacar.disabled = true; // hunt travada: o botao nao clica
+  const win = fakeWin({ stepMs: 1200 });
+  const emits = [];
+  const api = globalThis.PokeRoute.installRoute({
+    config: { enabled: true, targets: [{ pokeId: 10, slug: 'caterpie', nome: 'Caterpie' }] },
+    pack: PACK,
+    emit: (e) => emits.push(e),
+    doc,
+    win,
+    now,
+  });
+  for (let n = 0; n < 40 && api.isRunning(); n += 1) win.flush();
+  const states = emits.map((e) => e.state);
+  assert.ok(states.includes('falha-ficha'), states.join(','));
+  assert.equal(api.isRunning(), false);
+});
+
+test('maquina: porta de troca recusa o marcador — re-clique ate viajar', () => {
+  nowMs = 1000;
+  const doc = fakeDoc({
+    tabs: ['kanto'],
+    markersByTab: { caterpie: { tab: 'kanto' } },
+    hudPokeId: '99',
+    caidos: { present: false },
+    portaDeTroca: 2,
+  });
+  const win = fakeWin({ stepMs: 1200 });
+  const emits = [];
+  const api = globalThis.PokeRoute.installRoute({
+    config: { enabled: true, targets: [{ pokeId: 10, slug: 'caterpie', nome: 'Caterpie' }] },
+    pack: PACK,
+    emit: (e) => emits.push(e),
+    doc,
+    win,
+    now,
+  });
+  for (let n = 0; n < 10 && !emits.some((e) => e.state === 'viajando'); n += 1) win.flush();
+  const states = emits.map((e) => e.state);
+  assert.ok(states.includes('viajando'), states.join(','));
+  assert.ok(doc._probe.markers['kanto|caterpie']._clicks >= 3, 're-clicou o marcador ate a porta abrir');
+  assert.equal(api.arrive('caterpie'), true);
+  assert.equal(api.isRunning(), true);
+});
+
+test('maquina: porta recusa o botao da ficha — wait-hud volta e tenta de novo', () => {
+  nowMs = 1000;
+  const doc = fakeDoc({
+    tabs: ['kanto'],
+    markersByTab: { caterpie: { tab: 'kanto' } },
+    hudPokeId: '99',
+    caidos: { present: false },
+    fichaMovel: true,
+    portaDeTroca: 2,
+  });
+  const win = fakeWin({ stepMs: 1200 });
+  const emits = [];
+  const api = globalThis.PokeRoute.installRoute({
+    config: { enabled: true, targets: [{ pokeId: 10, slug: 'caterpie', nome: 'Caterpie' }] },
+    pack: PACK,
+    emit: (e) => emits.push(e),
+    doc,
+    win,
+    now,
+  });
+  for (let n = 0; n < 14 && !emits.some((e) => e.state === 'aguardando-chegada'); n += 1) win.flush();
+  const states = emits.map((e) => e.state);
+  assert.ok(states.includes('aguardando-chegada'), states.join(','));
+  assert.equal(doc._probe.haCacar._clicks, 3, 're-clicou "Cacar aqui" ate a porta abrir');
+  assert.equal(doc._probe.aberto(), false, 'o clique que viajou fechou o modal');
+  assert.equal(api.arrive('caterpie'), true);
+  assert.equal(api.isRunning(), true);
 });
 
 test('maquina: slug invalido nunca vira selector; sem alvos termina na hora', () => {
@@ -397,7 +709,7 @@ test('M1: advance do main entre ticks nao multiplica cadeias de timer', () => {
   const win = fakeWin();
   const emits = [];
   const api = globalThis.PokeRoute.installRoute({
-    config: { enabled: true, targets: [
+    config: { enabled: true, currentHuntSlug: 'a', targets: [
       { pokeId: 1, slug: 'a', nome: 'A' },
       { pokeId: 2, slug: 'b', nome: 'B' },
     ] },
@@ -410,14 +722,15 @@ test('M1: advance do main entre ticks nao multiplica cadeias de timer', () => {
   win.flush(); // hunt A: um arremesso
   assert.ok(emits.map((e) => e.state).includes('arremessando'));
   assert.equal(win.timers.length, 1);
-  api.advance(); // chega ENTRE ticks, com timer pendurado
+  api.advance('a'); // chega ENTRE ticks, com timer pendurado
   assert.equal(win.timers.length, 1, 'uma unica cadeia de tick apos advance');
-  win.flush(); // B: marcador -> viajando
+  win.flush(); // B: marcador -> ficha
+  win.flush(); // mapa fechou -> viajando
   assert.ok(emits.map((e) => e.state).includes('viajando'));
   assert.equal(win.timers.length, 1);
 });
 
-test('maquina: marcador .capturado pula sem gastar viagem nem bola', () => {
+test('maquina: marcador .capturado nao pula especie faltante da mesma area', () => {
   nowMs = 1000;
   const doc = fakeDoc({
     tabs: ['kanto'],
@@ -436,10 +749,46 @@ test('maquina: marcador .capturado pula sem gastar viagem nem bola', () => {
     now,
   });
   win.flush();
+  assert.equal(doc._probe.markers['kanto|drowzee']._clicks, 1, 'viaja mesmo com o anel dourado');
+  assert.equal(api.arrive('drowzee'), true);
+  win.flush();
   const states = emits.map((e) => e.state);
-  assert.ok(states.includes('skip-capturado'), states.join(','));
-  assert.equal(doc._probe.abas[0]._clicks, 0, 'nem trocou de aba');
-  assert.equal(api.isRunning(), false);
+  assert.equal(states.includes('skip-capturado'), false);
+  assert.equal(api.getState().index, 0, 'mantem o alvo ate a captura exata');
+  assert.equal(api.isRunning(), true);
+});
+
+test('maquina: captura varias especies da mesma area sem viajar de novo', () => {
+  nowMs = 1000;
+  const caidos = { nome: 'Primeiro', present: true };
+  const doc = fakeDoc({
+    tabs: ['kanto'],
+    markersByTab: { mesma_area: { tab: 'kanto' } },
+    hudPokeId: '99',
+    caidos,
+  });
+  const win = fakeWin();
+  const emits = [];
+  const api = globalThis.PokeRoute.installRoute({
+    config: { enabled: true, currentHuntSlug: 'mesma_area', targets: [
+      { pokeId: 1, slug: 'mesma_area', nome: 'Primeiro' },
+      { pokeId: 2, slug: 'mesma_area', nome: 'Segundo' },
+    ] },
+    pack: PACK,
+    emit: (e) => emits.push(e),
+    doc,
+    win,
+    now,
+  });
+  win.flush();
+  assert.equal(doc._probe.caido._clicks, 1);
+  caidos.nome = 'Segundo';
+  assert.equal(api.advance('mesma_area'), true);
+  assert.equal(api.getState().phase, 'hunt');
+  win.flush();
+  assert.equal(doc._probe.caido._clicks, 2);
+  assert.equal(api.getState().index, 1);
+  assert.equal(emits.some((e) => e.state === 'viajando'), false);
 });
 
 test('maquina: continua no alvo depois de dois minutos sem captura', () => {
@@ -453,7 +802,7 @@ test('maquina: continua no alvo depois de dois minutos sem captura', () => {
   const win = fakeWin({ stepMs: 50_000 }); // cada tick "passa" 50 s
   const emits = [];
   const api = globalThis.PokeRoute.installRoute({
-    config: { enabled: true, targets: [
+    config: { enabled: true, currentHuntSlug: 'z', targets: [
       { pokeId: 5, slug: 'z', nome: 'Z' },
       { pokeId: 6, slug: 'q', nome: 'Q' },
     ] },
@@ -509,7 +858,7 @@ test('maquina: limite de arremessos para a rota no alvo sem pular', () => {
   const win = fakeWin();
   const emits = [];
   const api = globalThis.PokeRoute.installRoute({
-    config: { enabled: true, maxBolas: 1, targets: [
+    config: { enabled: true, maxBolas: 1, currentHuntSlug: 'z', targets: [
       { pokeId: 5, slug: 'z', nome: 'Z' },
       { pokeId: 6, slug: 'q', nome: 'Q' },
     ] },
@@ -538,7 +887,6 @@ test('maquina: mapa fechou com aba .on ORFA -> reabre sozinho e segue (bug do fo
     markersByTab: { a: { tab: 'kanto' }, b: { tab: 'johto' } },
     hudPokeId: '99',
     caidos: { nome: 'B', present: true },
-    fechaAoViajar: true,
   });
   const win = fakeWin();
   const emits = [];
@@ -556,18 +904,18 @@ test('maquina: mapa fechou com aba .on ORFA -> reabre sozinho e segue (bug do fo
     win,
     now,
   });
-  win.flush(); // alvo A: marcador visivel -> viajando (mapa fecha)
+  win.flush(); // alvo A: marcador visivel -> ficha
   assert.equal(doc._probe.aberto(), false);
-  doc._probe.hud.dataset.pokeId = '1';
+  assert.equal(api.arrive('a'), true);
   win.flush(); // hunt A -> avanca via advance do main
-  api.advance();
+  api.advance('a');
   // alvo B esta em JOHTO, mapa fechou: precisa reabrir (bug o nos prendia aqui)
   for (let n = 0; n < 8; n += 1) win.flush();
   const states = emits.map((e) => e.state);
   assert.ok(states.includes('abrindo-mapa'), states.join(','));
   assert.ok(doc._probe.mapaBtn._clicks >= 1, 'clicou Mapa de novo');
   assert.ok(emits.some((e) => e.state === 'viajando' && e.index === 1), 'reabriu e selecionou o destino B');
-  doc._probe.hud.dataset.pokeId = '2';
+  assert.equal(api.arrive('b'), true);
   for (let n = 0; n < 4; n += 1) win.flush();
   assert.ok(emits.some((e) => e.state === 'arremessando' && e.index === 1), 'chegou e arremessou no B');
   assert.equal(api.isRunning(), true);
@@ -618,7 +966,7 @@ test('maquina: bolas zero no DOM param a rota na hora (espelho do welcome nao va
   const win = fakeWin();
   const emits = [];
   const api = globalThis.PokeRoute.installRoute({
-    config: { enabled: true, targets: [{ pokeId: 1, slug: 'a', nome: 'A' }] },
+    config: { enabled: true, currentHuntSlug: 'a', targets: [{ pokeId: 1, slug: 'a', nome: 'A' }] },
     pack: PACK,
     emit: (e) => emits.push(e),
     doc,

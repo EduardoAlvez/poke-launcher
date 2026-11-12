@@ -228,7 +228,9 @@ ipcRenderer.on('route:config', (_event, payload) => {
 
 ipcRenderer.on('route:cmd', (_event, cmd) => {
   if (cmd?.action === 'advance') {
-    routeHandle?.advance?.();
+    routeHandle?.advance?.(cmd.currentHuntSlug);
+  } else if (cmd?.action === 'arrived') {
+    routeHandle?.arrive?.(cmd.slug);
   } else if (cmd?.action === 'stop') {
     routeHandle?.stop?.('parado');
     routeHandle = null;

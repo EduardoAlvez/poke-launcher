@@ -898,6 +898,7 @@ ipcMain.handle('launcher:route-set', async (event, payload) => {
       maxAlvos: Number.isInteger(maxAlvos) && maxAlvos >= 1 && maxAlvos <= 500 ? maxAlvos : 3,
       levelCap: payload?.levelCap !== false,
       manualCapture: payload?.manualCapture === true,
+      gerenciaEconomia: gerenciaEconomiaDoSlot(slot),
       maxBolas: Number.isFinite(payload?.maxBolas) && payload.maxBolas > 0 ? Math.floor(payload.maxBolas) : null,
       pack: automationPack,
     });

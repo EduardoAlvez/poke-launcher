@@ -97,6 +97,18 @@
     return false;
   }
 
+  function openMobileCapturePanel(doc, pack) {
+    try {
+      if (!doc?.documentElement?.classList?.contains('mobile')) return false;
+      const panel = doc.querySelector(pack?.capturePanelSelector || '#caidos');
+      if (!panel || panel.hidden || panel.classList.contains('hidden') || panel.classList.contains('m-aberto')) return false;
+      const toggle = findFirst(doc, [pack?.captureToggleSelector || '#cena-captura']);
+      return toggle ? clickTarget(toggle, doc) : false;
+    } catch {
+      return false;
+    }
+  }
+
   function isEconomy(doc, pack) {
     if (!pack?.economySelector) return false;
     try {
@@ -205,6 +217,7 @@
             lastThrowAt = clock();
             report('clicking');
           } else {
+            openMobileCapturePanel(doc, pack);
             report('waiting-button');
           }
         }
@@ -264,5 +277,5 @@
     };
   }
 
-  root.PokeAutomation = { installAutomation, findFirst, isPaused, isVisible, isClickable, clickTarget, isEconomy, isAccountTaken };
+  root.PokeAutomation = { installAutomation, findFirst, isPaused, isVisible, isClickable, clickTarget, openMobileCapturePanel, isEconomy, isAccountTaken };
 })(globalThis);

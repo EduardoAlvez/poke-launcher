@@ -71,6 +71,8 @@ export class RouteController {
     const config = {
       enabled: true,
       targets: slim,
+      currentHuntSlug: st.huntSlug || null,
+      gerenciaEconomia: opts.gerenciaEconomia === true,
       maxBolas: opts.maxBolas,
       manualCapture: opts.manualCapture === true,
     };
@@ -79,6 +81,7 @@ export class RouteController {
       state: 'partindo',
       index: 0,
       targets: slim,
+      currentHuntSlug: st.huntSlug || null,
       baselineC: this.baselineFor(st, slim[0]),
       // Especies ja confirmadas nesta corrida: as DUAS fontes de confirmacao
       // (evento de captura e delta da dex) podem chegar e nao podem fazer a
@@ -148,7 +151,7 @@ export class RouteController {
     run.captured += 1;
     const st = this.getHuntState(slotId);
     run.baselineC = this.baselineFor(st, t);
-    this.sendToSlot(slotId, 'route:cmd', { action: 'advance' });
+    this.sendToSlot(slotId, 'route:cmd', { action: 'advance', currentHuntSlug: run.currentHuntSlug });
     this.log(`[route] ${slotId}: capturou ${t.nome} (${run.captured}/${run.targets.length})`);
     this.onChange(slotId);
     return true;
@@ -162,10 +165,16 @@ export class RouteController {
   onHuntUpdate(slotId, st) {
     const run = this.active.get(slotId);
     if (!run?.running || !st) return;
+    run.currentHuntSlug = typeof st.huntSlug === 'string' ? st.huntSlug : null;
     const t = run.targets[run.index];
     if (t) {
       const c = st.dex?.[String(t.pokeId)]?.c ?? 0;
-      if (c > (run.baselineC ?? 0)) this.confirmarCaptura(slotId, run, t);
+      const confirmado = run.confirmados?.has(t.pokeId);
+      if (!confirmado && c > (run.baselineC ?? 0)) {
+        this.confirmarCaptura(slotId, run, t);
+      } else if (!confirmado && st.huntSlug === t.slug) {
+        this.sendToSlot(slotId, 'route:cmd', { action: 'arrived', slug: t.slug });
+      }
     }
     const totalBolas = Object.values(st.balls ?? {}).reduce((s, v) => s + (Number(v) || 0), 0);
     if (!run.manualCapture && Object.keys(st.balls ?? {}).length && totalBolas <= 0) {
@@ -197,6 +206,9 @@ export class RouteController {
       run.index = idx;
       const st = this.getHuntState(slotId);
       run.baselineC = this.baselineFor(st, run.targets[idx]);
+      if (run.currentHuntSlug === run.targets[idx]?.slug) {
+        this.sendToSlot(slotId, 'route:cmd', { action: 'arrived', slug: run.targets[idx].slug });
+      }
     }
     if (Number.isFinite(msg.throws)) run.throws = msg.throws;
     if (Number.isFinite(msg.captured)) run.captured = msg.captured;
@@ -204,7 +216,13 @@ export class RouteController {
     // espelho do welcome congela porque o jogo nao manda balls nos deltas.
     if (Number.isFinite(msg.balls)) run.balls = msg.balls;
     if (typeof msg.state === 'string' && msg.state.length <= 40) run.state = msg.state;
-    if (msg.running === false) run.running = false;
+    if (msg.running === false) {
+      // A maquina pode acabar sozinha (falha-chegada, alvo-nao-localizado,
+      // limite-arremessos, sem-bolas, fila-completa): sem este log a corrida
+      // morria em silencio e o arquivo ficava so com "ligada".
+      if (run.running) this.log(`[route] ${slotId}: maquina parou (${msg.state || 'sem-estado'}) no alvo ${run.index + 1}/${run.targets.length}`);
+      run.running = false;
+    }
     this.onChange(slotId);
   }
 }

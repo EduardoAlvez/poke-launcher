@@ -1,14 +1,14 @@
 {
-  "version": 7,
+  "version": 8,
   "game": "pokeidle.io",
-  "updatedAt": "2026-11-10",
+  "updatedAt": "2026-11-12",
   "clickCandidates": ["#caidos-lista .caido", ".caidos-lista .caido", ".caido"],
   "countSelector": "#caidos-lista .caido",
   "pauseSelectors": ["#sessao-tomada:not(.hidden)"],
   "pauseText": ["sem bolas", "sem poções", "sem pocoes"],
   "economySelector": "html.modo-economia",
   "economyExitSelector": "#eco-sair",
-  "economyEnterSelector": ".hunt-eco",
+  "economyEnterSelector": "#hunt-eco",
   "accountTakenSelector": "#sessao-tomada:not(.hidden)",
   "stopOnRule": "pokemon-caught",
   "route": {
@@ -19,6 +19,12 @@
     "hudIdAttr": "pokeId",
     "caidoList": "#caidos-lista .caido",
     "caidoNome": ".caido-quem",
-    "ballSelected": "#caidos-bolas .caidos-bola.on"
+    "ballSelected": "#caidos-bolas .caidos-bola.on",
+    "menuAba": "#m-nav button[data-aba=\"menu\"]",
+    "btCacar": ".ha-cacar",
+    "mapaPrincipal": "#mapa-principal",
+    "modoListaClasse": "modo-lista",
+    "btModoMapa": ".mapa-modo-bt[data-modo=\"mapa\"]",
+    "btModoLista": ".mapa-modo-bt[data-modo=\"lista\"]"
   }
 }
