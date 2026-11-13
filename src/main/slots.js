@@ -96,8 +96,12 @@ export class SlotRegistry {
    * pacote nao escapar pela rede local.
    */
   async applyProxy(slot) {
-    const ses = slot?.view?.webContents?.session;
-    if (!ses || ses.isDestroyed()) return false;
+    // Session NAO tem isDestroyed(): o webContents e quem pode ter morrido;
+    // a session da particao sobrevive e e reaproveitada pela proxima view.
+    const wc = slot?.view?.webContents;
+    if (!wc || wc.isDestroyed?.()) return false;
+    const ses = wc.session;
+    if (!ses) return false;
     try {
       if (slot.proxy) {
         await ses.setProxy({ proxyRules: proxyRules(slot.proxy) });

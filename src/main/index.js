@@ -315,8 +315,10 @@ async function refreshLoginBadge(slot) {
  */
 async function verificarIp(slot) {
   if (!slot?.proxy) return;
-  const ses = slot.view?.webContents?.session;
-  if (!ses || ses.isDestroyed()) return;
+  // Session NAO tem isDestroyed(): confira o webContents e use a session dele.
+  const wc = slot.view?.webContents;
+  const ses = wc && !wc.isDestroyed?.() ? wc.session : null;
+  if (!ses) return;
   slot.exitIp = null;
   slot.exitIpErro = null;
   sendState();
