@@ -31,6 +31,18 @@ export function buildSlotMenu(slot, actions = {}) {
       checked: slot?.eco === true,
       click: () => actions.onEco?.(slot?.eco !== true),
     },
+    {
+      label: slot?.proxy ? 'Trocar proxy…' : 'Definir proxy…',
+      click: () => actions.onProxy?.(),
+    },
+    ...(slot?.proxy
+      ? [
+          {
+            label: `Remover proxy (saída: ${slot?.exitIp ?? slot?.exitIpErro ?? 'não verificada'})`,
+            click: () => actions.onProxyClear?.(),
+          },
+        ]
+      : []),
     { type: 'separator' },
     { label: 'Renomear…', click: () => actions.onRename?.() },
     {

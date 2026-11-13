@@ -218,6 +218,10 @@ body {
   font-size: 9px;
   font-weight: 600;
 }
+.chip .tag.proxy-tag {
+  border-color: var(--capture);
+  color: var(--capture-dark);
+}
 .chip .auto, .chip .light, .chip .p2 {
   min-height: 24px;
   padding: 2px 5px;

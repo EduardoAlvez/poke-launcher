@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld('launcher', {
   routeRisk: () => ipcRenderer.invoke('route:risk-text'),
   p2Set: (opts) => ipcRenderer.invoke('launcher:p2-set', opts),
   p2Risk: () => ipcRenderer.invoke('p2:risk-text'),
+  setProxy: (id, proxy) => ipcRenderer.invoke('launcher:set-proxy', { id, proxy }),
   onState: (cb) => ipcRenderer.on('launcher:state', (_e, slots) => cb(slots)),
   onRenameRequest: (cb) => ipcRenderer.on('launcher:rename-request', (_e, payload) => cb(payload ?? {})),
+  onProxyRequest: (cb) => ipcRenderer.on('launcher:proxy-request', (_e, payload) => cb(payload ?? {})),
 });

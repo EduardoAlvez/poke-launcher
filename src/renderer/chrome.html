@@ -228,6 +228,22 @@
       </div>
     </div>
   </div>
+
+  <div id="proxy-modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="proxy-title">
+      <h2 id="proxy-title">Proxy da sessão</h2>
+      <p id="proxy-slot" class="muted"></p>
+      <input id="proxy-input" type="text" spellcheck="false" placeholder="http://usuario:senha@host:porta ou socks5://host:porta" />
+      <p class="hint">Apenas esta sessão sai pelo proxy; o resto do PC continua na rede normal. O jogo fala WebSocket (TCP) — HTTP(S) e SOCKS5 servem. SOCKS5 com usuário/senha não é suportado pelo Chromium: prefira proxies HTTP autenticados.</p>
+      <p id="proxy-status" class="muted"></p>
+      <p id="proxy-error" class="error"></p>
+      <div class="actions">
+        <button id="proxy-cancel">Cancelar</button>
+        <button id="proxy-clear">Remover proxy</button>
+        <button id="proxy-save" class="ok">Salvar</button>
+      </div>
+    </div>
+  </div>
   <script src="chrome.js"></script>
 </body>
 </html>

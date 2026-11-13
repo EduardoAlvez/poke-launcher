@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { parseProxy } from './proxy.js';
 
 export const SCHEMA_VERSION = 1;
 export const DEFAULT_MAX_SLOTS = 8;
@@ -51,7 +52,7 @@ function parsePrefsEconomia(raw) {
 
 export function parseSlot(raw) {
   if (!raw || typeof raw !== 'object') return { ok: false, error: 'slot nao e objeto' };
-  const { id, name, url, partition, ratios, muted, zoomFactor, automation, lightMode, eco, dexWatch, prefsEconomia, prefsEconomiaPendente } = raw;
+  const { id, name, url, partition, ratios, muted, zoomFactor, automation, lightMode, eco, dexWatch, prefsEconomia, prefsEconomiaPendente, proxy } = raw;
   if (typeof id !== 'string' || !SLOT_ID.test(id)) {
     return { ok: false, error: `id invalido: ${JSON.stringify(id)}` };
   }
@@ -62,6 +63,11 @@ export function parseSlot(raw) {
   const nameStr = typeof name === 'string' ? name.slice(0, 24) : id;
   const ratiosOk =
     ratios && typeof ratios === 'object' && isRatio(ratios.x) && isRatio(ratios.y) && isRatio(ratios.w) && isRatio(ratios.h);
+  // Proxy invalido NAO pode custar a sessao (e o login dela): descarta e
+  // avisa — o padrao dos scripts. Sair sem proxy e mais seguro que sair
+  // fingindo que o proxy esta ligado.
+  const proxyParsed = parseProxy(proxy);
+  const warnings = proxyParsed.ok ? [] : [`proxy do slot ${id} descartado: ${proxyParsed.error}`];
   const slot = {
     id,
     name: nameStr,
@@ -76,8 +82,9 @@ export function parseSlot(raw) {
     prefsEconomia: parsePrefsEconomia(prefsEconomia),
     prefsEconomiaPendente: parsePrefsEconomia(prefsEconomiaPendente),
     automation: parseAutomation(automation),
+    proxy: proxyParsed.ok ? proxyParsed.proxy : null,
   };
-  return { ok: true, slot };
+  return { ok: true, slot, warnings };
 }
 
 /**
@@ -145,11 +152,13 @@ export function parseState(rawText) {
   if (!Array.isArray(data.slots)) return { ok: false, error: 'slots nao e array' };
   const slots = [];
   const seen = new Set();
+  const warnings = [];
   for (const rawSlot of data.slots) {
     const parsed = parseSlot(rawSlot);
     if (!parsed.ok) return parsed;
     if (seen.has(parsed.slot.id)) return { ok: false, error: `id duplicado: ${parsed.slot.id}` };
     seen.add(parsed.slot.id);
+    if (parsed.warnings?.length) warnings.push(...parsed.warnings);
     slots.push(parsed.slot);
   }
   // O limite nunca fica abaixo das sessoes ja salvas: restaurar acima do
@@ -164,7 +173,6 @@ export function parseState(rawText) {
   // Script invalido nao pode custar as sessoes: descarta o script e segue,
   // mas avisa (o modal nao pode fingir que o script nunca existiu).
   const scripts = [];
-  const warnings = [];
   if (data.scripts !== undefined && !Array.isArray(data.scripts)) {
     warnings.push('scripts nao e array; lista ignorada');
   }
@@ -206,6 +214,7 @@ export function buildSnapshot(previous, slots) {
         lightMode: s.lightMode === true,
         eco: s.eco === true,
         dexWatch: s.dexWatch === true,
+        proxy: s.proxy ?? null,
         prefsEconomia: parsePrefsEconomia(s.prefsEconomiaDoUsuario ?? s.prefsEconomia),
         prefsEconomiaPendente: parsePrefsEconomia(s.prefsEconomiaPendente),
         automation: s.automation ?? null,

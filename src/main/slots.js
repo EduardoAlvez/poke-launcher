@@ -11,6 +11,7 @@ import {
 import { installSlotExtensions } from './extensions.js';
 import { installDexHook } from './dex-hook.js';
 import { registerAddonPreload, matchesGame } from './addons.js';
+import { proxyRules } from './proxy.js';
 import { LightMode } from './light-mode.js';
 import { ECO_INSTALL, ecoSetExpr, ecoThrottleMs } from './eco.js';
 import { hostAllowed, withTimeout, INJECT_TIMEOUT_MS } from './scripts.js';
@@ -89,6 +90,33 @@ export class SlotRegistry {
   }
 
   /**
+   * Proxy por slot: a session e por particao, entao o setProxy vale para a
+   * view, os popups e TODO request daquela conta — e para ninguem mais.
+   * Precisa terminar ANTES do primeiro request (loadURL) para o primeiro
+   * pacote nao escapar pela rede local.
+   */
+  async applyProxy(slot) {
+    const ses = slot?.view?.webContents?.session;
+    if (!ses || ses.isDestroyed()) return false;
+    try {
+      if (slot.proxy) {
+        await ses.setProxy({ proxyRules: proxyRules(slot.proxy) });
+      } else {
+        await ses.setProxy({ mode: 'system' });
+      }
+      slot.proxyErro = null;
+      return true;
+    } catch (err) {
+      // Proxy rejeitado pelo Chromium (host inalcancavel na sintaxe, DNS do
+      // resolver, etc.): marca no slot — a UI mostra, e a rede volta ao
+      // padrao do sistema no proximo applyProxy com proxy vazio.
+      slot.proxyErro = String(err?.message ?? err).slice(0, 160);
+      console.error(`[${slot?.id ?? '?'}] proxy:`, slot.proxyErro);
+      return false;
+    }
+  }
+
+  /**
    * Aplica o modo eco no documento atual. O patch e instalado primeiro; se a
    * pagina ainda nao o tem (early return do install), o SET seguinte e no-op e
    * o valor inicial volta a ser aplicado no proximo carregamento.
@@ -143,7 +171,7 @@ export class SlotRegistry {
     this.lightMode.sync(slot).catch((err) => console.error(`[${slot.id}] modo leve:`, err?.message ?? err));
   }
 
-  async add(name, url = DEFAULT_URL, { id, maxSlots = MAX_SLOTS } = {}) {
+  async add(name, url = DEFAULT_URL, { id, maxSlots = MAX_SLOTS, proxy = null } = {}) {
     if (this.slots.length >= maxSlots) throw new Error(`Limite de ${maxSlots} sessoes`);
     const slotId = id || `slot-${++this.seq}`;
     if (id) {
@@ -163,6 +191,10 @@ export class SlotRegistry {
       lightMode: false,
       eco: false,
       dexWatch: false,
+      proxy: null,
+      exitIp: null,
+      exitIpErro: null,
+      proxyErro: null,
       // P2: consentimento de escrita POR EXECUCAO — em memoria, nunca no
       // slots.json (store.js nao o lista, entao o snapshot o descarta).
       p2Armado: false,
@@ -201,6 +233,9 @@ export class SlotRegistry {
         console.error(`[${slotId}] dex-hook:`, err.message)
       );
     }
+    slot.proxy = proxy ?? null;
+    // Antes do primeiro request: o loadURL de baixo nao pode escapar pelo IP local.
+    await this.applyProxy(slot);
     if (!this.slots.includes(slot)) return slot;
     if (this.win && !this.win.isDestroyed()) {
       this.win.contentView.addChildView(view);

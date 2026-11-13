@@ -65,3 +65,25 @@ test('menu sem zoom definido marca 100%', () => {
   const mute = menu.find((i) => i.label === 'Silenciar');
   assert.equal(mute.checked, false);
 });
+
+test('menu oferece definir proxy e, com proxy, trocar e remover', () => {
+  const chamadas = [];
+  const semProxy = buildSlotMenu({ name: 'Conta 4' }, { onProxy: () => chamadas.push('definir') });
+  const itemDefinir = semProxy.find((i) => i.label === 'Definir proxy…');
+  assert.ok(itemDefinir);
+  itemDefinir.click();
+  assert.deepEqual(chamadas, ['definir']);
+  assert.equal(semProxy.some((i) => i.label?.startsWith('Remover proxy')), false, 'sem proxy nao ha remover');
+
+  const comProxy = buildSlotMenu(
+    { name: 'Conta 4', proxy: 'socks5://1.2.3.4:1080', exitIp: '5.6.7.8' },
+    { onProxy: () => chamadas.push('trocar'), onProxyClear: () => chamadas.push('remover') }
+  );
+  const itemTrocar = comProxy.find((i) => i.label === 'Trocar proxy…');
+  assert.ok(itemTrocar);
+  const itemRemover = comProxy.find((i) => i.label?.startsWith('Remover proxy'));
+  assert.match(itemRemover.label, /5\.6\.7\.8/);
+  itemTrocar.click();
+  itemRemover.click();
+  assert.deepEqual(chamadas, ['definir', 'trocar', 'remover']);
+});

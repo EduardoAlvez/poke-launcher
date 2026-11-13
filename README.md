@@ -22,6 +22,12 @@ Baixe o instalador na página de releases:
   (`persist:slot-N`). Adicionar e remover pela toolbar, renomear com duplo clique no nome.
 - **Menu do chip** (clique direito): silenciar a sessão, zoom de 75% a 150% e **reler login**
   (limpa cookies e armazenamento só daquela conta; as outras sessões não mudam).
+- **Proxy por sessão (opcional)**: no menu do chip, **Definir proxy…** faz **apenas aquela sessão** sair
+  por um proxy próprio (`http://`, `https://` ou `socks5://`; o resto do PC continua na rede normal, sem
+  VPN nem Proxifier — cada conta pode ter um IP de saída diferente). O chip mostra a etiqueta `PROXY` e o
+  launcher confere o **IP de saída** pela própria sessão (requisição passa pelo proxy). Notas: SOCKS5 com
+  usuário/senha não é autenticado pelo Chromium — prefira proxies HTTP autenticados; as credenciais ficam
+  em texto puro no `slots.json` do seu usuário (quem tem acesso à sua conta do Windows tem acesso a elas).
 - **Grade ajustável**: 1, 2 ou 3 colunas (o padrão é 2); com várias sessões visíveis, o desenho da cena
   fica limitado a 5 quadros por segundo. No modo Foco, a sessão selecionada volta à taxa normal.
 - **Modo foco**: amplia uma sessão para ocupar a área de jogo abaixo da barra do launcher; as outras

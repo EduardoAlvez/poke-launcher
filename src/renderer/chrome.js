@@ -134,6 +134,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !scriptsModal.hidden) closeScriptsModal();
   else if (e.key === 'Escape' && !focusModal.hidden) closeFocusChooser();
   else if (e.key === 'Escape' && !modal.hidden) closeModal();
+  else if (e.key === 'Escape' && !proxyModal.hidden) closeProxyModal();
   else if (e.key === 'Escape' && !closePopupsBtn.hidden) window.launcher.closePopups();
   else if (e.key === 'Escape' && focusedSlotId) exitFocusMode();
 });
@@ -507,6 +508,10 @@ function createChip() {
   p2.type = 'button';
   p2.textContent = 'P2';
   chip.appendChild(p2);
+  const proxy = document.createElement('span');
+  proxy.className = 'tag proxy-tag';
+  proxy.hidden = true;
+  chip.appendChild(proxy);
   const x = document.createElement('span');
   x.className = 'x';
   x.textContent = '×';
@@ -514,7 +519,7 @@ function createChip() {
   x.setAttribute('role', 'button');
   x.tabIndex = 0;
   chip.appendChild(x);
-  const view = { chip, dot, copy, label, status, tag, light, auto, p2, slot: null, rename: null, lightError: false, lightNote: '' };
+  const view = { chip, dot, copy, label, status, tag, light, auto, p2, proxy, slot: null, rename: null, lightError: false, lightNote: '' };
   chip.addEventListener('click', () => {
     if (!view.slot) return;
     if (focusedSlotId) {
@@ -679,12 +684,23 @@ function updateChip(view, s) {
   const age = enabled && s.autoLastTick ? Date.now() - s.autoLastTick : null;
   view.auto.dataset.stalled = age !== null && age > 20000 ? 'true' : 'false';
   view.auto.title = autoTitle(s);
+  const comProxy = Boolean(s.proxy);
+  view.proxy.hidden = !comProxy;
+  view.proxy.textContent = 'PROXY';
+  view.proxy.title = comProxy
+    ? proxyStatusText(s)
+    : '';
   view.chip.title = s.route?.running
     ? `Rota de captura ativa: ${s.route.state || '...'} (alvo ${Math.min((s.route.index ?? 0) + 1, s.route.total ?? 1)}/${s.route.total ?? '?'} · ${s.route.captured ?? 0} capturadas)`
-    : '';
+    : comProxy && s.exitIp
+      ? `Saindo pelo proxy ${s.proxy} (IP: ${s.exitIp})`
+      : comProxy
+        ? `Proxy definido: ${s.proxy}${s.exitIpErro ? ` (verificacao falhou: ${s.exitIpErro})` : ''}`
+        : '';
 }
 
 window.launcher.onRenameRequest(({ id }) => chipViews.get(id)?.rename?.());
+window.launcher.onProxyRequest(({ id }) => openProxyModal(id));
 
 window.launcher.onState((slots) => {
   lastSlots = slots;
@@ -853,6 +869,74 @@ function closeScriptsModal() {
   scriptsBtn.focus();
 }
 
+const proxyModal = document.getElementById('proxy-modal');
+const proxySlot = document.getElementById('proxy-slot');
+const proxyInput = document.getElementById('proxy-input');
+const proxyStatus = document.getElementById('proxy-status');
+const proxyError = document.getElementById('proxy-error');
+const proxySave = document.getElementById('proxy-save');
+const proxyClear = document.getElementById('proxy-clear');
+document.getElementById('proxy-cancel').addEventListener('click', closeProxyModal);
+let proxySlotId = null;
+
+function proxyStatusText(slot) {
+  if (!slot.proxy) return 'Sem proxy — saindo pela rede local.';
+  const onde = slot.exitIp ? `saindo por ${slot.exitIp}` : slot.exitIpErro ? `saída falhou: ${slot.exitIpErro}` : slot.proxyErro ? `falha ao aplicar: ${slot.proxyErro}` : 'verificando IP de saída…';
+  return `Proxy: ${slot.proxy} — ${onde}`;
+}
+
+function openProxyModal(id) {
+  const slot = lastSlots.find((s) => s.id === id);
+  if (!slot) return;
+  proxySlotId = id;
+  proxySlot.textContent = `Sessão: ${slot.name}`;
+  proxyInput.value = slot.proxy ?? '';
+  proxyStatus.textContent = proxyStatusText(slot);
+  proxyError.textContent = '';
+  proxyClear.hidden = !slot.proxy;
+  proxyModal.hidden = false;
+  window.launcher.setViewsVisible(false);
+  proxyInput.focus();
+  proxyInput.select();
+}
+
+function closeProxyModal() {
+  proxyModal.hidden = true;
+  proxySlotId = null;
+  proxyError.textContent = '';
+  window.launcher.setViewsVisible(true);
+}
+
+async function salvarProxy(valor) {
+  if (!proxySlotId) return;
+  proxySave.disabled = true;
+  proxyError.textContent = '';
+  try {
+    const res = await window.launcher.setProxy(proxySlotId, valor);
+    if (!res?.ok) {
+      proxyError.textContent = res?.error || 'Falha ao salvar';
+      return;
+    }
+    closeProxyModal();
+  } catch (err) {
+    proxyError.textContent = err?.message ?? 'Falha ao salvar';
+  } finally {
+    proxySave.disabled = false;
+  }
+}
+
+proxySave.addEventListener('click', () => salvarProxy(proxyInput.value));
+proxyInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    salvarProxy(proxyInput.value);
+  }
+});
+proxyClear.addEventListener('click', () => salvarProxy(''));
+proxyModal.addEventListener('click', (e) => {
+  if (e.target === proxyModal) closeProxyModal();
+});
+
 async function refreshScripts() {
   try {
     const res = await window.launcher.scripts();
@@ -1013,6 +1097,7 @@ const ROUTE_STATE_LABELS = {
   'abrindo-mapa': 'abrindo mapa',
   viajando: 'viajando para o local',
   'aguardando-chegada': 'aguardando confirmação de chegada',
+  'retentando-viagem': 'viagem recusada; tentando novamente',
   'aguardando-alvo': 'aguardando o alvo atual',
   'esperando-caido': 'aguardando o Pokémon aparecer',
   'aguardando-vip': 'aguardando captura do VIP',

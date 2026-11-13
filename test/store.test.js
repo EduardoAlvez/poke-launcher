@@ -100,6 +100,47 @@ test('parseSlot: lightMode e por sessao e desligado por padrao', () => {
   assert.equal(parseSlot({ ...validSlot, lightMode: 'sim' }).slot.lightMode, false);
 });
 
+test('parseSlot: proxy valido entra no slot; invalido e descartado com aviso', () => {
+  const bom = parseSlot({ ...validSlot, proxy: 'socks5://user:pass@1.2.3.4:1080' });
+  assert.equal(bom.ok, true);
+  assert.equal(bom.slot.proxy, 'socks5://user:pass@1.2.3.4:1080');
+  assert.deepEqual(bom.warnings, []);
+
+  const sem = parseSlot(validSlot);
+  assert.equal(sem.slot.proxy, null, 'sem proxy na particao antiga = sem proxy');
+  assert.deepEqual(sem.warnings, []);
+
+  const ruim = parseSlot({ ...validSlot, proxy: 'ftp://host:21' });
+  assert.equal(ruim.ok, true, 'proxy ruim nao pode custar a sessao (e o login dela)');
+  assert.equal(ruim.slot.proxy, null);
+  assert.equal(ruim.warnings.length, 1);
+  assert.match(ruim.warnings[0], /slot-1.*comece com/);
+});
+
+test('parseState avisa sobre proxy descartado e mantem as sessoes', () => {
+  const estado = {
+    schemaVersion: SCHEMA_VERSION,
+    slots: [{ ...validSlot, proxy: 'nada de esquema' }],
+  };
+  const res = parseState(JSON.stringify(estado));
+  assert.equal(res.ok, true);
+  assert.equal(res.state.slots.length, 1);
+  assert.equal(res.state.slots[0].proxy, null);
+  assert.match(res.warnings.join(' '), /proxy do slot slot-1/);
+});
+
+test('buildSnapshot persiste o proxy do slot vivo', async () => {
+  const { buildSnapshot } = await import('../src/main/store.js');
+  const previous = { schemaVersion: SCHEMA_VERSION, maxSlots: 8, slots: [], scripts: [] };
+  const live = [
+    { id: 'slot-1', name: 'Conta 1', url: 'https://pokeidle.io/app', muted: false, zoomFactor: 1, lightMode: false, eco: false, dexWatch: false, automation: null, proxy: 'http://user:pass@host:3128' },
+    { id: 'slot-2', name: 'Conta 2', url: 'https://pokeidle.io/app', muted: false, zoomFactor: 1, lightMode: false, eco: false, dexWatch: false, automation: null, proxy: null },
+  ];
+  const snap = buildSnapshot(previous, live);
+  assert.equal(snap.slots[0].proxy, 'http://user:pass@host:3128');
+  assert.equal(snap.slots[1].proxy, null);
+});
+
 test('automacao e opt-in: enabled so com consent', () => {
   assert.equal(parseAutomation(undefined).enabled, false);
   assert.equal(parseAutomation({ enabled: true }).enabled, false);

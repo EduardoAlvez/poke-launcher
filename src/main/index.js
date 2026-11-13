@@ -18,6 +18,7 @@ import { buildDexHook, installDexHook, dexFlagExpr } from './dex-hook.js';
 import { createHuntState, loadWelcome, applyDelta, huntView, catalogMissing } from './hunt-report.js';
 import { openLog, formatArgs } from './log.js';
 import { buildSlotMenu } from './slot-menu.js';
+import { parseProxy, proxyAuth } from './proxy.js';
 import { canReset, RESET_DETAIL } from './reset.js';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -256,6 +257,10 @@ function pushState() {
       muted: s.muted === true,
       zoomFactor: s.zoomFactor ?? 1,
       eco: s.eco === true,
+      proxy: s.proxy ?? null,
+      proxyErro: s.proxyErro ?? null,
+      exitIp: s.exitIp ?? null,
+      exitIpErro: s.exitIpErro ?? null,
       automation: {
         enabled: s.automation?.enabled === true,
         exitEconomy: s.automation?.exitEconomy !== false,
@@ -302,6 +307,43 @@ async function refreshLoginBadge(slot) {
   }
   sendState();
 }
+
+/**
+ * Confere o IP de saida da sessao PELA sessao (net.fetch com `session`): a
+ * requisicao passa pelo proxy configurado, entao o IP devolvido e o IP que
+ * o jogo ve. Sem proxy o campo fica null (nao adianta revelar o IP de casa).
+ */
+async function verificarIp(slot) {
+  if (!slot?.proxy) return;
+  const ses = slot.view?.webContents?.session;
+  if (!ses || ses.isDestroyed()) return;
+  slot.exitIp = null;
+  slot.exitIpErro = null;
+  sendState();
+  try {
+    // ses.fetch (nao net.fetch): so o metodo da propria session roda o
+    // request COM o proxy dela — net.fetch iria pela session default.
+    const res = await withTimeout(ses.fetch('https://api.ipify.org?format=text'), 10_000, 'verificacao de ip');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    slot.exitIp = String((await res.text()).trim()).slice(0, 45);
+  } catch (err) {
+    slot.exitIpErro = String(err?.message ?? err).slice(0, 120);
+  }
+  sendState();
+}
+
+// Proxies HTTP/HTTPS com credenciais: o Chromium pede autenticacao pelo
+// evento `login` (SOCKS com senha nao e suportado pelo Chromium). Responde
+// so quando o webContents pertence a um slot com proxy com senha — as
+// outras sessoes (e o resto do app) seguem o comportamento padrao.
+app.on('login', (event, webContents, _details, authInfo, callback) => {
+  if (authInfo?.isProxy !== true) return;
+  const slot = registry.findByWebContentsId(webContents?.id);
+  const auth = proxyAuth(slot?.proxy);
+  if (!auth) return;
+  event.preventDefault();
+  callback(auth.user, auth.pass);
+});
 
 function createWindow() {
   win = new BrowserWindow({
@@ -442,7 +484,7 @@ async function restoreSlots() {
   }
   for (const slot of toRestore) {
     try {
-      await registry.add(slot.name, slot.url, { id: slot.id, maxSlots: persisted.maxSlots });
+      await registry.add(slot.name, slot.url, { id: slot.id, maxSlots: persisted.maxSlots, proxy: slot.proxy ?? null });
       const created = registry.get(slot.id);
       if (created) {
         created.muted = slot.muted;
@@ -466,6 +508,12 @@ async function restoreSlots() {
   sendState();
   for (const slot of registry.slots) {
     setTimeout(() => refreshLoginBadge(slot), 4000);
+  }
+  // Slots com proxy confirmam o IP de saida uma vez por boot (a requisicao
+  // vai pelo proprio proxy) — sem isso o menu ficaria para sempre
+  // "nao verificada" depois de reiniciar.
+  for (const slot of registry.slots) {
+    if (slot.proxy) setTimeout(() => verificarIp(slot).catch(() => {}), 2500);
   }
   // A preferencia de Economia/Ultra que ficou PENDENTE (o modo leve desligou
   // com AUTO/rota rodando) precisa voltar em algum momento — inclusive
@@ -562,6 +610,43 @@ async function setSlotEco(slot, on) {
   registry.applyEcoPrefs(slot).catch((err) => console.error(`[${slot.id}] modo eco:`, err?.message ?? err));
 }
 
+/**
+ * Proxy por sessao: o valor chega ja parseado do modal, mas o parse e
+ * repetido aqui (o IPC e fronteira — nunca confiar no renderer). Persistir
+ * ANTES de aplicar: se o setProxy falhar, o slots.json ja reflete a escolha
+ * e o proximo boot aplica de novo.
+ */
+async function setSlotProxy(slot, value) {
+  const parsed = parseProxy(value);
+  if (!parsed.ok) return { ok: false, error: parsed.error };
+  slot.proxy = parsed.proxy;
+  slot.exitIp = null;
+  slot.exitIpErro = null;
+  await persist();
+  sendState();
+  const aplicado = await registry.applyProxy(slot);
+  if (!aplicado && slot.proxy) {
+    // Falhou o setProxy: nao deixa o slot mentindo proxy. Volta o valor,
+    // persiste e avisa — o usuario decide trocar ou remover.
+    slot.proxyErro = slot.proxyErro ?? 'setProxy falhou';
+  }
+  sendState();
+  if (slot.proxy) {
+    console.log(`[proxy] ${slot.id}: ${slot.proxyErro ? 'falhou' : 'aplicado'} — verificando IP de saida`);
+    await verificarIp(slot);
+  } else {
+    console.log(`[proxy] ${slot.id}: removido (rede local)`);
+  }
+  return { ok: true, proxy: slot.proxy, erro: slot.proxyErro ?? null };
+}
+
+ipcMain.handle('launcher:set-proxy', (event, payload) => {
+  if (!isChrome(event.sender)) return { ok: false, error: 'origem invalida' };
+  const slot = registry.get(payload?.id);
+  if (!slot) return { ok: false, error: 'sessao inexistente' };
+  return setSlotProxy(slot, payload?.proxy);
+});
+
 async function resetSlot(slot) {
   const permitido = canReset(registry.get(slot?.id));
   if (!permitido.ok) return permitido;
@@ -627,6 +712,8 @@ ipcMain.handle('launcher:slot-menu', (event, payload) => {
       onMute: (muted) => run(setSlotMuted(slot, muted)),
       onZoom: (factor) => run(setSlotZoom(slot, factor)),
       onEco: (on) => run(setSlotEco(slot, on)),
+      onProxy: () => win.webContents.send('launcher:proxy-request', { id: slot.id }),
+      onProxyClear: () => run(setSlotProxy(slot, null)),
       onRename: () => win.webContents.send('launcher:rename-request', { id: slot.id }),
       onReset: () => run(resetSlot(slot)),
     })
