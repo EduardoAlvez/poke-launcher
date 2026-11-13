@@ -244,6 +244,16 @@
       }
     };
 
+    const retryTravel = (state, agora) => {
+      phase = 'travel';
+      phaseStart = agora;
+      tabTries = 0;
+      modoTries = 0;
+      marcadorAlvo = null;
+      emitStatus(state);
+      schedule();
+    };
+
     const caidoDoAlvo = (nome) => {
       try {
         const alvo = String(nome || '').toLowerCase();
@@ -304,9 +314,13 @@
         }
 
         // A chegada e confirmada pelo huntSlug recebido no processo principal.
-        // Nao repete cliques nem troca de alvo enquanto o servidor nao confirmar.
+        // Se o jogo recusar a viagem durante um combate, tenta o mesmo destino
+        // de novo; so `arrive()` confirma a chegada.
         if (phase === 'wait-hud') {
-          if (agora - phaseStart > travelTimeoutMs) return finish('falha-chegada');
+          if (agora - phaseStart > travelTimeoutMs) {
+            retryTravel('retentando-viagem', agora);
+            return;
+          }
           if (mapaAberto()) {
             // o modal ainda esta em pe: a viagem NAO aconteceu — a porta de
             // troca de hunt recusou o clique da ficha. Volta para a ficha,
@@ -339,10 +353,12 @@
           }
           // Porta de troca de hunt: ao entrar numa hunt o servidor impoe uma
           // espera (~10 s) e a tela RECUSA a troca com toast, sem viajar e
-          // sem fechar o mapa. Re-clique a cada tick (marcador no desktop,
-          // onde o clique e a viagem; botao da ficha no movel, que acabou de
-          // ser recusado) ate a porta abrir — 15 s cobrem a porta com folga.
-          if (agora - fichaInicio > 15000) return finish('falha-ficha');
+          // sem fechar o mapa. Re-clique a cada tick; se continuar bloqueado,
+          // reinicia o ciclo no mesmo alvo apos 15 s.
+          if (agora - fichaInicio > 15000) {
+            retryTravel('retentando-viagem', agora);
+            return;
+          }
           if (!btCacar && marcadorAlvo && PA) PA.clickTarget(marcadorAlvo, doc);
           emitStatus('ficha-hunt');
           return schedule();

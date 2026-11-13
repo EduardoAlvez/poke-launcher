@@ -588,7 +588,7 @@ test('maquina: movel — toque no marcador abre a ficha; "Cacar aqui" e quem via
   assert.equal(doc._probe.caido._clicks, 1);
 });
 
-test('maquina: ficha sem botao viajavel para com falha-ficha, nao laco', () => {
+test('maquina: ficha bloqueada por combate tenta o mesmo destino novamente', () => {
   nowMs = 1000;
   const doc = fakeDoc({
     tabs: ['kanto'],
@@ -610,8 +610,10 @@ test('maquina: ficha sem botao viajavel para com falha-ficha, nao laco', () => {
   });
   for (let n = 0; n < 40 && api.isRunning(); n += 1) win.flush();
   const states = emits.map((e) => e.state);
-  assert.ok(states.includes('falha-ficha'), states.join(','));
-  assert.equal(api.isRunning(), false);
+  assert.ok(states.includes('retentando-viagem'), states.join(','));
+  assert.ok(doc._probe.markers['kanto|caterpie']._clicks >= 2, 'reattempts the same marker');
+  assert.equal(api.getState().index, 0, 'keeps the current target');
+  assert.equal(api.isRunning(), true, 'keeps running until arrival or manual stop');
 });
 
 test('maquina: porta de troca recusa o marcador — re-clique ate viajar', () => {
@@ -818,7 +820,7 @@ test('maquina: continua no alvo depois de dois minutos sem captura', () => {
   assert.equal(emits.some((e) => e.state === 'skip-tempo'), false);
 });
 
-test('maquina: falha ao chegar para no alvo atual sem avançar', () => {
+test('maquina: chegada nao confirmada reabre o mapa e tenta o destino novamente', () => {
   nowMs = 1000;
   const doc = fakeDoc({
     tabs: ['kanto'],
@@ -839,12 +841,12 @@ test('maquina: falha ao chegar para no alvo atual sem avançar', () => {
     win,
     now,
   });
-  for (let n = 0; n < 5 && api.isRunning(); n += 1) win.flush();
-  const final = emits[emits.length - 1];
-  assert.equal(final.state, 'falha-chegada');
-  assert.equal(final.index, 0);
-  assert.equal(final.running, false);
+  for (let n = 0; n < 7 && api.isRunning(); n += 1) win.flush();
+  const states = emits.map((e) => e.state);
+  assert.ok(states.includes('retentando-viagem'), states.join(','));
+  assert.ok(doc._probe.markers['kanto|z']._clicks >= 2, 'reopens and clicks the same destination again');
   assert.equal(api.getState().index, 0);
+  assert.equal(api.isRunning(), true);
 });
 
 test('maquina: limite de arremessos para a rota no alvo sem pular', () => {
